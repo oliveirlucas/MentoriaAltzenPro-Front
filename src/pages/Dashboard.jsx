@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
-import { FileText, Calendar, ArrowRight, TrendingUp, ScrollText } from 'lucide-react'
+import { FileText, Calendar, ArrowRight, TrendingUp, ScrollText, Video, ExternalLink } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { formatProgramType } from '../lib/programType.js'
 import { getEnrollmentCycleProgress, FORM_TYPES } from '../lib/adminStudentInsight.js'
@@ -43,10 +43,19 @@ function archivesByEnrollment(archiveRows) {
   return [...m.values()].sort((a, b) => b.enrollment_id - a.enrollment_id)
 }
 
+function sessionStatusLabel(status) {
+  if (status === 'completed') return 'Concluída'
+  if (status === 'cancelled') return 'Cancelada'
+  if (status === 'scheduled') return 'Agendada'
+  return status || '—'
+}
+
 export default function Dashboard() {
   const { profile, enrollments, enrollmentFormArchives, user } = useAuth()
   const [lastActivity, setLastActivity] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
+  const [calendarSessions, setCalendarSessions] = useState([])
+  const [sessionsErr, setSessionsErr] = useState(null)
 
   const archiveGroups = useMemo(
     () => archivesByEnrollment(enrollmentFormArchives),
@@ -55,6 +64,29 @@ export default function Dashboard() {
   const archiveEnrollmentIds = useMemo(
     () => new Set(archiveGroups.map((g) => g.enrollment_id)),
     [archiveGroups]
+  )
+
+  const scheduledSessions = useMemo(() => {
+    const list = (calendarSessions || []).filter((s) => s.session_status === 'scheduled')
+    return [...list].sort((a, b) => {
+      const ta = new Date(a.starts_at).getTime()
+      const tb = new Date(b.starts_at).getTime()
+      return (Number.isFinite(ta) ? ta : 0) - (Number.isFinite(tb) ? tb : 0)
+    })
+  }, [calendarSessions])
+
+  const completedSessions = useMemo(() => {
+    const list = (calendarSessions || []).filter((s) => s.session_status === 'completed')
+    return [...list].sort((a, b) => {
+      const ta = new Date(a.starts_at).getTime()
+      const tb = new Date(b.starts_at).getTime()
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0)
+    })
+  }, [calendarSessions])
+
+  const cancelledSessions = useMemo(
+    () => (calendarSessions || []).filter((s) => s.session_status === 'cancelled'),
+    [calendarSessions]
   )
 
   const portalDiag = profile?.portal_diagnostico_enabled === true
@@ -86,6 +118,26 @@ export default function Dashboard() {
     }
   }, [user?.id, portalDiag, portalPlano])
 
+  useEffect(() => {
+    if (!user?.id || profile?.role === 'admin') return
+    let ok = true
+    ;(async () => {
+      try {
+        setSessionsErr(null)
+        const d = await api('/me/calendar-sessions')
+        if (ok) setCalendarSessions(d.sessions || [])
+      } catch (e) {
+        if (ok) {
+          setCalendarSessions([])
+          setSessionsErr(e.message || 'Não foi possível carregar os agendamentos.')
+        }
+      }
+    })()
+    return () => {
+      ok = false
+    }
+  }, [user?.id, profile?.role])
+
   if (profile?.role === 'admin') {
     return <Navigate to="/admin" replace />
   }
@@ -104,6 +156,118 @@ export default function Dashboard() {
       </p>
 
       {loadErr && <p className="mt-2 text-sm text-amber-700">Nota: {loadErr}</p>}
+      {sessionsErr && <p className="mt-2 text-sm text-amber-700">Agendamentos: {sessionsErr}</p>}
+
+      <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
+        <div className="flex items-center gap-2 text-slate-800">
+          <Calendar className="h-5 w-5 text-indigo-600" />
+          <h2 className="text-lg font-bold text-slate-900">As suas sessões com o mentor</h2>
+        </div>
+        <p className="mt-1 text-sm text-slate-600">
+          Sessões associadas à sua conta no portal. Quando o mentor o associa a um agendamento, o Google envia convite
+          para o e-mail da sua conta (aparece na sua agenda, por exemplo no Google Calendar).
+        </p>
+
+        {!sessionsErr && calendarSessions.length === 0 && (
+          <p className="mt-4 text-sm text-slate-500">
+            Ainda não há sessões registadas. Quando o mentor o associar a um evento no calendário, elas aparecem aqui.
+          </p>
+        )}
+
+          {scheduledSessions.length > 0 && (
+            <div className="mt-5">
+              <h3 className="text-sm font-semibold text-slate-800">Agendadas</h3>
+              <ul className="mt-2 space-y-3">
+                {scheduledSessions.map((s) => (
+                  <li
+                    key={s.id}
+                    className="rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-800"
+                  >
+                    <p className="font-medium text-slate-900">{s.title || 'Sessão'}</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      {formatDateTimePt(s.starts_at)} — {formatDateTimePt(s.ends_at)}
+                      {s.time_zone ? ` · ${s.time_zone}` : ''}
+                    </p>
+                    {s.mentor_full_name && (
+                      <p className="mt-1 text-xs text-slate-500">Mentor: {s.mentor_full_name}</p>
+                    )}
+                    <p className="mt-1 text-xs font-medium text-indigo-700">{sessionStatusLabel(s.session_status)}</p>
+                    {s.meet_link && (
+                      <a
+                        href={s.meet_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-indigo-700 hover:underline"
+                      >
+                        <Video className="h-3.5 w-3.5 shrink-0" />
+                        Entrar no Google Meet
+                      </a>
+                    )}
+                    {s.google_html_link && (
+                      <a
+                        href={s.google_html_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 ml-0 inline-flex items-center gap-1.5 text-xs text-slate-600 hover:underline"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        Abrir no Google Calendar
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {completedSessions.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-slate-800">Concluídas</h3>
+              <ul className="mt-2 space-y-3">
+                {completedSessions.map((s) => (
+                  <li
+                    key={s.id}
+                    className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800"
+                  >
+                    <p className="font-medium text-slate-900">{s.title || 'Sessão'}</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      {formatDateTimePt(s.starts_at)} — {formatDateTimePt(s.ends_at)}
+                    </p>
+                    {s.mentor_full_name && (
+                      <p className="mt-1 text-xs text-slate-500">Mentor: {s.mentor_full_name}</p>
+                    )}
+                    {s.meet_link && (
+                      <a
+                        href={s.meet_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-600 hover:underline"
+                      >
+                        <Video className="h-3.5 w-3.5 shrink-0" />
+                        Link Meet (registo)
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {cancelledSessions.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-slate-600">Canceladas</h3>
+              <ul className="mt-2 space-y-2">
+                {cancelledSessions.map((s) => (
+                  <li key={s.id} className="text-xs text-slate-500">
+                    <span className="font-medium text-slate-700">{s.title || 'Sessão'}</span>
+                    {' · '}
+                    {formatDateTimePt(s.starts_at)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+      </section>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-5">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
-import { KeyRound, Save } from 'lucide-react'
+import { KeyRound, Loader2, Save } from 'lucide-react'
 
 const inputClass = 'mt-0.5 w-full rounded border border-slate-300 px-3 py-2 text-sm'
 
@@ -22,6 +22,8 @@ export default function ProfilePage() {
   const [postal_code, setPostal] = useState('')
   const [country, setCountry] = useState('')
   const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [passwordSaving, setPasswordSaving] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -49,6 +51,7 @@ export default function ProfilePage() {
   const save = async (e) => {
     e.preventDefault()
     setMessage('')
+    setSaving(true)
     try {
       await api('/profile', {
         method: 'PATCH',
@@ -73,6 +76,8 @@ export default function ProfilePage() {
       setMessage('Salvo.')
     } catch (e2) {
       setMessage(e2.message || 'Erro')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -91,6 +96,7 @@ export default function ProfilePage() {
       setPasswordMessage('Digite a senha atual.')
       return
     }
+    setPasswordSaving(true)
     try {
       await api('/me/password', {
         method: 'POST',
@@ -102,6 +108,8 @@ export default function ProfilePage() {
       setPasswordMessage('ok')
     } catch (e2) {
       setPasswordMessage(e2.message || 'Não foi possível alterar a senha')
+    } finally {
+      setPasswordSaving(false)
     }
   }
 
@@ -118,7 +126,7 @@ export default function ProfilePage() {
         </p>
       )}
 
-      <form onSubmit={save} className="mt-6 max-w-2xl space-y-6">
+      <form onSubmit={save} className="mt-6 max-w-2xl space-y-6" aria-busy={saving}>
         {message && (
           <p className={`text-sm ${message === 'Salvo.' ? 'text-emerald-700' : 'text-red-600'}`}>{message}</p>
         )}
@@ -201,13 +209,26 @@ export default function ProfilePage() {
           </div>
         </fieldset>
 
-        <button type="submit" className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white">
-          <Save className="h-4 w-4" />
-          Salvar
+        <button
+          type="submit"
+          disabled={saving}
+          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {saving ? (
+            <>
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+              A guardar…
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4 shrink-0" aria-hidden />
+              Salvar
+            </>
+          )}
         </button>
       </form>
 
-      <form onSubmit={changePassword} className="mt-10 max-w-2xl space-y-4">
+      <form onSubmit={changePassword} className="mt-10 max-w-2xl space-y-4" aria-busy={passwordSaving}>
         <h2 className="text-lg font-bold text-slate-900">Segurança</h2>
         {passwordMessage && (
           <p
@@ -264,10 +285,20 @@ export default function ProfilePage() {
         </fieldset>
         <button
           type="submit"
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-900 shadow-sm hover:bg-slate-50"
+          disabled={passwordSaving}
+          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          <KeyRound className="h-4 w-4" />
-          Atualizar senha
+          {passwordSaving ? (
+            <>
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+              A atualizar…
+            </>
+          ) : (
+            <>
+              <KeyRound className="h-4 w-4 shrink-0" aria-hidden />
+              Atualizar senha
+            </>
+          )}
         </button>
       </form>
     </div>

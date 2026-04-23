@@ -628,7 +628,19 @@ export default function AdminStudentDetail() {
         ? { form_type: f.form_type, updated_at: null, payload: null }
         : f
     )
-    const h = computeMentorHealth({ enrollment: primary, form_snapshots: formsForCurrentCycle })
+    const stu = data.student
+    const portalForHealth =
+      stu.portal_diagnostico_enabled !== undefined || stu.portal_plano_90_enabled !== undefined
+        ? {
+            portal_diagnostico_enabled: !!stu.portal_diagnostico_enabled,
+            portal_plano_90_enabled: !!stu.portal_plano_90_enabled,
+          }
+        : undefined
+    const h = computeMentorHealth({
+      enrollment: primary,
+      form_snapshots: formsForCurrentCycle,
+      portal: portalForHealth,
+    })
     const t = buildTimeline({
       notes: data.notes,
       form_snapshots: forms,
@@ -650,8 +662,10 @@ export default function AdminStudentDetail() {
   const archiveByEnrollment = useMemo(() => {
     const m = new Map()
     for (const r of data?.enrollment_archive_index || []) {
-      if (!m.has(r.enrollment_id)) m.set(r.enrollment_id, {})
-      m.get(r.enrollment_id)[r.form_type] = r.archived_at
+      const eid = Number(r.enrollment_id)
+      if (!Number.isFinite(eid)) continue
+      if (!m.has(eid)) m.set(eid, {})
+      m.get(eid)[r.form_type] = r.archived_at
     }
     return m
   }, [data])
@@ -877,8 +891,9 @@ export default function AdminStudentDetail() {
               .slice(0, -1)
               .reverse()
               .map((en) => {
+                const eidPrev = Number(en.id)
                 const prog = getEnrollmentCycleProgress(en)
-                const arch = archiveByEnrollment.get(en.id) || {}
+                const arch = archiveByEnrollment.get(eidPrev) || {}
                 const hasDiagArch = Boolean(arch[FORM_TYPES.DIAG])
                 const hasPlanoArch = Boolean(arch[FORM_TYPES.PLANO])
                 const isClosed = en.state === 'concluida' || en.state === 'encerrada'
@@ -922,7 +937,7 @@ export default function AdminStudentDetail() {
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-3">
                       {hasDiagArch && (
                         <Link
-                          to={`/admin/alunos/${id}/diagnostico?arquivo=${en.id}`}
+                          to={`/admin/alunos/${id}/diagnostico?arquivo=${eidPrev}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 sm:text-sm"
@@ -934,7 +949,7 @@ export default function AdminStudentDetail() {
                       )}
                       {hasPlanoArch && (
                         <Link
-                          to={`/admin/alunos/${id}/plano-90-dias?arquivo=${en.id}`}
+                          to={`/admin/alunos/${id}/plano-90-dias?arquivo=${eidPrev}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 sm:text-sm"
@@ -1016,8 +1031,10 @@ export default function AdminStudentDetail() {
           <p className="mt-2">
             <strong>Formulários ativos</strong> (diagnóstico e plano) são <strong>um registo por aluno</strong> no
             portal. Ao encerrar uma inscrição como <strong>concluída</strong> ou <strong>encerrada</strong>, o sistema
-            guarda uma <strong>cópia</strong> ligada a essa linha (links abaixo em cada inscrição e em{' '}
-            <strong>Ciclos anteriores</strong>).
+            guarda uma <strong>cópia</strong> ligada a essa linha (links na própria linha quando está encerrada e em{' '}
+            <strong>Ciclos anteriores</strong>). Se a <strong>inscrição atual</strong> voltar a <strong>ativa</strong> e
+            já existir cópia de um encerramento anterior, os links aparecem num bloco separado «último encerramento desta
+            inscrição» — não confundir com o ciclo anterior nem com o formulário ao vivo.
             O resumo abaixo e as páginas de edição mostram sempre o último guardado ao vivo.
           </p>
         </div>
@@ -1029,11 +1046,18 @@ export default function AdminStudentDetail() {
         {data.enrollments && data.enrollments.length > 0 && (
           <div className="mt-4 space-y-4">
             {data.enrollments.map((en) => {
-              const isLast = en.id === primaryEnrollment?.id
-              const archRow = archiveByEnrollment.get(en.id) || {}
+              const eid = Number(en.id)
+              const isLast = eid === Number(primaryEnrollment?.id)
+              const archRow = archiveByEnrollment.get(eid) || {}
               const hasDiagRow = Boolean(archRow[FORM_TYPES.DIAG])
               const hasPlanoRow = Boolean(archRow[FORM_TYPES.PLANO])
               const closedRow = en.state === 'concluida' || en.state === 'encerrada'
+              const openRow = en.state === 'ativa' || en.state === 'agendada'
+              /** Na inscrição atual em aberto, não misturar com os mesmos botões do estado — o arquivo é do último encerramento desta linha, não do “ciclo ao vivo”. */
+              const showInlineArchiveLinks =
+                (hasDiagRow || hasPlanoRow) && (!isLast || closedRow)
+              const showSnapshotOnly = closedRow && (!hasDiagRow || !hasPlanoRow)
+              const showReopenedArchiveBox = isLast && openRow && (hasDiagRow || hasPlanoRow)
               return (
                 <div
                   key={en.id}
@@ -1086,31 +1110,33 @@ export default function AdminStudentDetail() {
                       />
                     </div>
                   </div>
-                  {(hasDiagRow || hasPlanoRow || (closedRow && (!hasDiagRow || !hasPlanoRow))) && (
+                  {(showInlineArchiveLinks || showSnapshotOnly) && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-3">
-                      {hasDiagRow && (
+                      {showInlineArchiveLinks && hasDiagRow && (
                         <Link
-                          to={`/admin/alunos/${id}/diagnostico?arquivo=${en.id}`}
+                          to={`/admin/alunos/${id}/diagnostico?arquivo=${eid}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 sm:text-sm"
                         >
                           <FileText className="h-4 w-4 shrink-0 text-blue-700" aria-hidden />
                           Diagnóstico (arquivo)
+                          <span className="text-slate-500">· {formatPt(archRow[FORM_TYPES.DIAG])}</span>
                         </Link>
                       )}
-                      {hasPlanoRow && (
+                      {showInlineArchiveLinks && hasPlanoRow && (
                         <Link
-                          to={`/admin/alunos/${id}/plano-90-dias?arquivo=${en.id}`}
+                          to={`/admin/alunos/${id}/plano-90-dias?arquivo=${eid}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 sm:text-sm"
                         >
                           <BookOpen className="h-4 w-4 shrink-0 text-indigo-700" aria-hidden />
                           Plano 90d (arquivo)
+                          <span className="text-slate-500">· {formatPt(archRow[FORM_TYPES.PLANO])}</span>
                         </Link>
                       )}
-                      {closedRow && (!hasDiagRow || !hasPlanoRow) && (
+                      {showSnapshotOnly && (
                         <button
                           type="button"
                           disabled={snapBusyId === en.id}
@@ -1120,6 +1146,44 @@ export default function AdminStudentDetail() {
                           {snapBusyId === en.id ? 'A gravar…' : 'Arquivar formulários atuais nesta inscrição'}
                         </button>
                       )}
+                    </div>
+                  )}
+                  {showReopenedArchiveBox && (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 shadow-sm">
+                      <p className="font-semibold text-slate-900">
+                        Arquivo do último encerramento desta inscrição (#{eid})
+                      </p>
+                      <p className="mt-1 leading-snug text-slate-600">
+                        Cópia guardada quando esta <strong>mesma linha</strong> esteve concluída ou encerrada antes de
+                        voltar a ativa. Não corresponde ao formulário ao vivo dos cartões no topo (nem ao arquivo das
+                        inscrições anteriores na secção «Ciclos anteriores»).
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {hasDiagRow && (
+                          <Link
+                            to={`/admin/alunos/${id}/diagnostico?arquivo=${eid}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-900 hover:bg-slate-100 sm:text-sm"
+                          >
+                            <FileText className="h-4 w-4 shrink-0 text-blue-700" aria-hidden />
+                            Diagnóstico (último arquivo)
+                            <span className="text-slate-500">· {formatPt(archRow[FORM_TYPES.DIAG])}</span>
+                          </Link>
+                        )}
+                        {hasPlanoRow && (
+                          <Link
+                            to={`/admin/alunos/${id}/plano-90-dias?arquivo=${eid}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-900 hover:bg-slate-100 sm:text-sm"
+                          >
+                            <BookOpen className="h-4 w-4 shrink-0 text-indigo-700" aria-hidden />
+                            Plano 90d (último arquivo)
+                            <span className="text-slate-500">· {formatPt(archRow[FORM_TYPES.PLANO])}</span>
+                          </Link>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

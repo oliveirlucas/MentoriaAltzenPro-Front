@@ -21,6 +21,7 @@ import {
 import { ADMIN_STUDENTS_REFRESH } from '../lib/adminEvents.js'
 import AdminCreateStudentModal from '../components/AdminCreateStudentModal.jsx'
 import { formatProgramType } from '../lib/programType.js'
+import { computeAdminListAttention } from '../lib/adminStudentInsight.js'
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50]
 
@@ -36,6 +37,21 @@ function enrollmentStateLabel(state) {
       return 'Encerrada'
     default:
       return state ? String(state) : '—'
+  }
+}
+
+function attentionChipClass(band) {
+  switch (band) {
+    case 'critical':
+      return 'border-rose-300 bg-rose-50 text-rose-950'
+    case 'late':
+      return 'border-orange-300 bg-orange-50 text-orange-950'
+    case 'watch':
+      return 'border-amber-300 bg-amber-50 text-amber-950'
+    case 'info':
+      return 'border-sky-300 bg-sky-50 text-sky-950'
+    default:
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900'
   }
 }
 
@@ -250,7 +266,9 @@ export default function AdminDashboard() {
 
         <p className="clear-both mt-1 text-slate-600">
           Visão geral de progresso. A coluna <strong>Mentoria</strong> mostra a última inscrição do aluno; se tiver
-          vários ciclos, o número entre parêntesis indica quantas inscrições existem (detalhe na ficha).
+          vários ciclos, o número entre parêntesis indica quantas inscrições existem (detalhe na ficha). A coluna{' '}
+          <strong>Prioridade</strong> resume atrasos, pendências de formulários e situações que pedem atenção (passe o
+          rato para ver o detalhe).
         </p>
       </div>
 
@@ -372,12 +390,13 @@ export default function AdminDashboard() {
           </p>
 
           <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className="w-full min-w-[860px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <th className="p-3 font-semibold">Nome / E-mail</th>
                   <th className="p-3 font-semibold">Mentoria</th>
                   <th className="p-3 font-semibold">Estado</th>
+                  <th className="p-3 font-semibold">Prioridade</th>
                   <th className="p-3 font-semibold">Último envio</th>
                   <th className="p-3" />
                 </tr>
@@ -385,14 +404,16 @@ export default function AdminDashboard() {
               <tbody>
                 {pageRows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-500">
+                    <td colSpan={6} className="p-8 text-center text-slate-500">
                       {students.length === 0
                         ? 'Nenhum aluno registado.'
                         : 'Nenhum aluno corresponde ao filtro. Limpe a pesquisa ou tente outro termo.'}
                     </td>
                   </tr>
                 ) : (
-                  pageRows.map((s) => (
+                  pageRows.map((s) => {
+                    const att = computeAdminListAttention(s)
+                    return (
                     <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50/80">
                       <td className="p-3">
                         <div className="font-medium text-slate-900">{s.full_name || '—'}</div>
@@ -419,6 +440,14 @@ export default function AdminDashboard() {
                           </span>
                         )}
                       </td>
+                      <td className="max-w-[220px] p-3">
+                        <span
+                          className={`inline-flex max-w-full cursor-default rounded-full border px-2.5 py-0.5 text-xs font-semibold ${attentionChipClass(att.band)}`}
+                          title={att.detail}
+                        >
+                          <span className="truncate">{att.label}</span>
+                        </span>
+                      </td>
                       <td className="p-3 text-slate-600">
                         {s.last_form_activity
                           ? new Date(s.last_form_activity).toLocaleString('pt-BR')
@@ -434,7 +463,8 @@ export default function AdminDashboard() {
                         </Link>
                       </td>
                     </tr>
-                  ))
+                    )
+                  })
                 )}
               </tbody>
             </table>

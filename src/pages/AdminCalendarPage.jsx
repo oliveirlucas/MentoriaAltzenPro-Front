@@ -279,7 +279,7 @@ export default function AdminCalendarPage() {
     setFormEndDate(b.date)
     setFormEndTime(b.time)
     setFormTimeZone(ev.timeZone || 'America/Sao_Paulo')
-    setFormCreateMeet(false)
+    setFormCreateMeet(!ev.meetLink)
     setFormStudentId(ev.student?.id != null ? String(ev.student.id) : '')
     setFormSessionStatus(ev.sessionStatus || 'scheduled')
     setShowForm(true)
@@ -671,13 +671,13 @@ export default function AdminCalendarPage() {
                     className="h-4 w-4 rounded border-slate-300 text-indigo-600"
                     checked={formCreateMeet}
                     onChange={(e) => setFormCreateMeet(e.target.checked)}
-                    disabled={Boolean(editingEventId)}
                   />
                   <span className="text-sm text-slate-800">
                     Criar sala Google Meet para este agendamento
                     {editingEventId ? (
                       <span className="block text-xs font-normal text-slate-500">
-                        Na edição, o Meet existente mantém-se; só é criado se ainda não houver link e marcar aqui.
+                        Ao editar: se o evento <strong>ainda não tiver</strong> link Meet, marque aqui e guarde para a
+                        API criar a sala. Se já existir Meet, o Google mantém o link (desmarcar não remove a reunião).
                       </span>
                     ) : null}
                   </span>

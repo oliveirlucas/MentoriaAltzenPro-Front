@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
-import { Save } from 'lucide-react'
+import { KeyRound, Save } from 'lucide-react'
 
 const inputClass = 'mt-0.5 w-full rounded border border-slate-300 px-3 py-2 text-sm'
 
@@ -22,6 +22,10 @@ export default function ProfilePage() {
   const [postal_code, setPostal] = useState('')
   const [country, setCountry] = useState('')
   const [message, setMessage] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordMessage, setPasswordMessage] = useState('')
 
   useEffect(() => {
     if (profile) {
@@ -67,8 +71,37 @@ export default function ProfilePage() {
       })
       await refreshMe()
       setMessage('Salvo.')
-    } catch (e) {
-      setMessage(e.message || 'Erro')
+    } catch (e2) {
+      setMessage(e2.message || 'Erro')
+    }
+  }
+
+  const changePassword = async (e) => {
+    e.preventDefault()
+    setPasswordMessage('')
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage('A confirmação da nova senha não coincide.')
+      return
+    }
+    if (String(newPassword).length < 6) {
+      setPasswordMessage('A nova senha deve ter pelo menos 6 caracteres.')
+      return
+    }
+    if (!currentPassword) {
+      setPasswordMessage('Digite a senha atual.')
+      return
+    }
+    try {
+      await api('/me/password', {
+        method: 'POST',
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordMessage('ok')
+    } catch (e2) {
+      setPasswordMessage(e2.message || 'Não foi possível alterar a senha')
     }
   }
 
@@ -171,6 +204,70 @@ export default function ProfilePage() {
         <button type="submit" className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white">
           <Save className="h-4 w-4" />
           Salvar
+        </button>
+      </form>
+
+      <form onSubmit={changePassword} className="mt-10 max-w-2xl space-y-4">
+        <h2 className="text-lg font-bold text-slate-900">Segurança</h2>
+        {passwordMessage && (
+          <p
+            className={`text-sm ${passwordMessage === 'ok' ? 'text-emerald-700' : 'text-red-600'}`}
+            role="status"
+          >
+            {passwordMessage === 'ok' ? 'Senha alterada com sucesso.' : passwordMessage}
+          </p>
+        )}
+
+        <fieldset className="space-y-3 rounded-xl border border-slate-200 p-4">
+          <legend className="px-1 text-sm font-semibold text-slate-800">Trocar senha</legend>
+          <p className="text-xs text-slate-500">É preciso informar a senha atual, a nova senha e a confirmação.</p>
+          <div>
+            <label className="text-sm text-slate-600" htmlFor="perfil-senha-atual">
+              Senha atual
+            </label>
+            <input
+              id="perfil-senha-atual"
+              className={inputClass}
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600" htmlFor="perfil-nova-senha">
+              Nova senha
+            </label>
+            <input
+              id="perfil-nova-senha"
+              className={inputClass}
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              minLength={6}
+            />
+          </div>
+          <div>
+            <label className="text-sm text-slate-600" htmlFor="perfil-confirmar-senha">
+              Confirmar nova senha
+            </label>
+            <input
+              id="perfil-confirmar-senha"
+              className={inputClass}
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+        </fieldset>
+        <button
+          type="submit"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-900 shadow-sm hover:bg-slate-50"
+        >
+          <KeyRound className="h-4 w-4" />
+          Atualizar senha
         </button>
       </form>
     </div>

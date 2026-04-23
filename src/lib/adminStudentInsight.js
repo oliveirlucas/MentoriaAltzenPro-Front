@@ -1,0 +1,268 @@
+import { formatProgramType } from './programType.js'
+
+/** Tipos conhecidos (mesmos da API) */
+export const FORM_TYPES = {
+  DIAG: 'altzen-diagnostico-carreira',
+  PLANO: 'altzen-plano-90-dias',
+}
+
+/**
+ * O portal mantém um único par de snapshots (diagnóstico / plano) por aluno.
+ * Com uma nova inscrição (novo ciclo), se a última gravação do formulário for
+ * anterior à criação da inscrição mais recente, o conteúdo ainda corresponde ao
+ * ciclo anterior — não deve alimentar resumo nem alertas do ciclo atual.
+ *
+ * @param {object|null|undefined} primaryEnrollment inscrição mais recente (última da lista)
+ * @param {string|null|undefined} formUpdatedAt `updated_at` do snapshot
+ * @param {number} enrollmentCount número de linhas de inscrição
+ */
+export function isLiveFormPredatesPrimaryEnrollment(primaryEnrollment, formUpdatedAt, enrollmentCount) {
+  if (enrollmentCount < 2 || !primaryEnrollment || !formUpdatedAt) return false
+  const anchor = primaryEnrollment.created_at
+  if (anchor == null || String(anchor).trim() === '') return false
+  const tForm = new Date(formUpdatedAt).getTime()
+  const tEnr = new Date(anchor).getTime()
+  if (Number.isNaN(tForm) || Number.isNaN(tEnr)) return false
+  return tForm < tEnr
+}
+
+const PROFILE_MAP = {
+  A: 'Transição p/ dev',
+  B: 'Júnior consolidando base',
+  C: 'Pleno → senioridade',
+  D: 'Outro',
+}
+
+function sumScoredObject(obj) {
+  if (!obj || typeof obj !== 'object') return 0
+  return Object.values(obj).reduce((acc, v) => acc + (Number(v) || 0), 0)
+}
+
+/**
+ * @param {object|null} payload
+ */
+export function getDiagnosticoSummary(payload) {
+  if (!payload || typeof payload !== 'object') return null
+  const tech = sumScoredObject(payload.techScores)
+  const career = sumScoredObject(payload.careerScores)
+  const p = payload.profile
+  return {
+    tech,
+    career,
+    techMax: 90,
+    careerMax: 60,
+    profileCode: p || '—',
+    profileLabel: p && PROFILE_MAP[p] ? `Perfil ${p}: ${PROFILE_MAP[p]}` : p ? `Perfil ${p}` : '—',
+    goals: Array.isArray(payload.goals) ? payload.goals : [],
+  }
+}
+
+/**
+ * @param {object|null} payload
+ */
+export function getPlanoSummary(payload) {
+  if (!payload || typeof payload !== 'object') return null
+  const objective = typeof payload.mainGoal?.objective === 'string' ? payload.mainGoal.objective.trim() : ''
+  const capaTitle = typeof payload.capa?.title === 'string' ? payload.capa.title.trim() : ''
+  const firstLine = objective || capaTitle
+  return {
+    headline: firstLine ? (firstLine.length > 200 ? `${firstLine.slice(0, 200)}…` : firstLine) : '—',
+    hasWeeksWithText:
+      Array.isArray(payload.weeks) &&
+      payload.weeks.some(
+        (w) =>
+          w &&
+          ['weekObjective', 'techFocus', 'entregas', 'evidence'].some((k) => String(w[k] || '').trim())
+      ),
+  }
+}
+
+function atMidnight(d) {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
+/**
+ * Dia 1 = dia de início. Retorna 1..90 enquanto dentro do período, ou 90+ se ultrapassou.
+ * @param {string|null|undefined} startedAt - ISO date do Postgres
+ * @param {Date} [now]
+ */
+export function getDayInProgram(startedAt, now = new Date()) {
+  if (startedAt == null || String(startedAt).trim() === '') return null
+  const t0 = new Date(startedAt)
+  if (Number.isNaN(t0.getTime())) return null
+  const a = atMidnight(t0)
+  const b = atMidnight(now)
+  if (!a || !b) return null
+  const diff = Math.floor((b - a) / 864e5) + 1
+  if (diff < 1) return 1
+  if (diff > 90) return 90
+  return diff
+}
+
+/**
+ * @param {number|null} day 1-90
+ */
+export function getExpectedMentorWeek12(day) {
+  if (day == null) return null
+  return Math.min(12, Math.max(1, Math.floor((day - 1) / 7) + 1))
+}
+
+/**
+ * Ritmo 90d de uma inscrição concreta (para comparar ciclos quando há várias linhas).
+ * Usa `ended_at` como referência temporal quando existe; caso contrário, `now`.
+ * @param {object|null|undefined} enrollment
+ * @param {Date} [now]
+ * @returns {{ day: number|null, week: number|null, refLabel: string }|null}
+ */
+export function getEnrollmentCycleProgress(enrollment, now = new Date()) {
+  if (!enrollment) return null
+  const started = enrollment.started_at
+  if (started == null || String(started).trim() === '') {
+    return { day: null, week: null, refLabel: 'sem data de início' }
+  }
+  let ref = now
+  let refLabel = 'hoje'
+  const endedRaw = enrollment.ended_at
+  if (endedRaw != null && String(endedRaw).trim() !== '') {
+    const endD = new Date(endedRaw)
+    if (!Number.isNaN(endD.getTime())) {
+      ref = endD
+      refLabel = 'no fecho'
+    }
+  }
+  const day = getDayInProgram(started, ref)
+  const week = getExpectedMentorWeek12(day)
+  return { day, week, refLabel }
+}
+
+/**
+ * @param {{
+ *  enrollment: object|null
+ *  form_snapshots: Array<{ form_type: string, updated_at: string }>
+ *  now?: Date
+ * }} p
+ */
+export function computeMentorHealth({ enrollment, form_snapshots, now = new Date() }) {
+  const forms = form_snapshots || []
+  const by = Object.fromEntries(forms.map((f) => [f.form_type, f]))
+  const state = enrollment?.state || ''
+  const activeLike = state === 'ativa' || state === 'agendada'
+  const started = enrollment?.started_at
+
+  const day = getDayInProgram(started, now)
+  const week = getExpectedMentorWeek12(day)
+
+  const planU = by[FORM_TYPES.PLANO]?.updated_at
+  const diaU = by[FORM_TYPES.DIAG]?.updated_at
+
+  const lastPlanoAt = planU ? new Date(planU) : null
+  const daysSincePlano =
+    lastPlanoAt && !Number.isNaN(lastPlanoAt.getTime())
+      ? Math.floor((now - lastPlanoAt) / 864e5)
+      : null
+
+  /** @type {{ level: 'high'|'medium'|'low'|'info', text: string }[]} */
+  const messages = []
+  if (state === 'ativa' && (started == null || String(started).trim() === '')) {
+    messages.push({ level: 'low', text: 'Defina a data de início da mentoria para acompanhar semanas e atraso.' })
+  }
+  if (state === 'ativa' && day && day > 1 && !planU) {
+    messages.push({ level: 'high', text: 'Plano 90 dias ainda sem registo com o programa em curso (início +2 dias ou mais).' })
+  } else if (state === 'ativa' && planU && (daysSincePlano ?? 0) > 14 && day && day > 1) {
+    messages.push({
+      level: 'high',
+      text: `Plano sem ser gravado há cerca de ${daysSincePlano} dia(s) — risco de atraso de execução (aulas/ritmo).`,
+    })
+  } else if (state === 'ativa' && planU && (daysSincePlano ?? 0) > 7) {
+    messages.push({
+      level: 'medium',
+      text: `Cerca de ${daysSincePlano} dia(s) sem nova gravação do plano no portal.`,
+    })
+  } else if (state === 'ativa' && planU && (daysSincePlano ?? 0) > 3) {
+    messages.push({ level: 'low', text: 'Alguns dias sem registo do plano — acompanhe na mentoria de rotina.' })
+  }
+  if (activeLike && !diaU) {
+    if (day && day >= 14) {
+      messages.push({ level: 'medium', text: 'Diagnóstico ainda vazio após 2 semanas (recomendado no início do ciclo).' })
+    } else if (day && day >= 7) {
+      messages.push({ level: 'low', text: 'Ainda sem diagnóstico salvo — alinhe preenchimento com o aluno.' })
+    }
+  }
+  if (day && day >= 80 && state === 'ativa') {
+    messages.push({ level: 'info', text: 'Aproximando o fim da janela de 90 dias — preparar fecho ou redefinir o plano.' })
+  }
+
+  let status = 'ok' // ok | atencao | atraso | critico
+  if (messages.some((n) => n.level === 'high')) status = 'critico'
+  else if (messages.some((n) => n.level === 'medium')) status = 'atraso'
+  else if (messages.some((n) => n.level === 'low')) status = 'atencao'
+
+  return {
+    day,
+    week,
+    state,
+    daysSincePlano,
+    lastPlanoAt: planU,
+    lastDiagAt: diaU,
+    hasPlano: !!planU,
+    hasDiag: !!diaU,
+    status,
+    messages,
+  }
+}
+
+const FORM_TITLES = {
+  [FORM_TYPES.DIAG]: 'Formulário: diagnóstico de carreira',
+  [FORM_TYPES.PLANO]: 'Formulário: plano de 90 dias',
+}
+
+/**
+ * @param {{ notes: object[], form_snapshots: object[], enrollments: object[] }} p
+ */
+export function buildTimeline({ notes, form_snapshots, enrollments }) {
+  const ev = []
+  for (const n of notes || []) {
+    const links = Array.isArray(n.attachment_links) ? n.attachment_links.length : 0
+    const files = Array.isArray(n.attachment_files) ? n.attachment_files.length : 0
+    const bits = [n.visible_to_student ? 'Visível ao aluno' : 'Apenas mentor']
+    if (links) bits.push(`${links} link(s)`)
+    if (files) bits.push(`${files} anexo(s)`)
+    ev.push({
+      kind: 'nota',
+      at: n.created_at,
+      title: n.title || 'Nota do mentor',
+      sub: bits.join(' · '),
+      body: n.body,
+      id: `n-${n.id}`,
+      noteId: n.id,
+    })
+  }
+  for (const f of form_snapshots || []) {
+    ev.push({
+      kind: 'formulario',
+      at: f.updated_at,
+      form_type: f.form_type,
+      title: FORM_TITLES[f.form_type] || f.form_type,
+      id: `f-${f.form_type}`,
+    })
+  }
+  for (const e of enrollments || []) {
+    ev.push({
+      kind: 'inscricao',
+      at: e.created_at,
+      title: 'Inscrição / mentoria',
+      details: `${formatProgramType(e.program_type)} — estado: ${e.state || '—'}`,
+      id: `e-${e.id}`,
+    })
+  }
+  return ev
+    .filter((x) => x.at)
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+}
+
+export function formIconLabel(type) {
+  if (type === FORM_TYPES.DIAG) return 'Diagnóstico'
+  if (type === FORM_TYPES.PLANO) return 'Plano 90d'
+  return (type || '').replace(/^altzen-/, '')
+}

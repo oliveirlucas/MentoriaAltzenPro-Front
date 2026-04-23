@@ -1,12 +1,21 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useToast } from '../context/ToastContext.jsx'
 import { api } from '../lib/api.js'
-import { KeyRound, Loader2, Save } from 'lucide-react'
+import {
+  maskCpfInput,
+  maskPhoneBrInput,
+  maskCepInput,
+  onlyDigits,
+  fetchAddressByCep,
+} from '../lib/brInputs.js'
+import { KeyRound, Loader2, Save, User } from 'lucide-react'
 
 const inputClass = 'mt-0.5 w-full rounded border border-slate-300 px-3 py-2 text-sm'
 
 export default function ProfilePage() {
   const { profile, user, refreshMe } = useAuth()
+  const toast = useToast()
   const [full_name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [city, setCity] = useState('')
@@ -21,36 +30,67 @@ export default function ProfilePage() {
   const [state_region, setStateRegion] = useState('')
   const [postal_code, setPostal] = useState('')
   const [country, setCountry] = useState('')
-  const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [passwordMessage, setPasswordMessage] = useState('')
+  const [cepLoading, setCepLoading] = useState(false)
+  const profileCepLookupRef = useRef('')
 
   useEffect(() => {
     if (profile) {
       setName(profile.full_name || '')
-      setPhone(profile.phone || '')
+      setPhone(maskPhoneBrInput(profile.phone || ''))
       setCity(profile.city || '')
       setLinkedin(profile.linkedin || '')
       setGithub(profile.github || '')
-      setCpf(profile.cpf || '')
+      setCpf(maskCpfInput(profile.cpf || ''))
       setRg(profile.rg || '')
       setBirthDate(profile.birth_date ? String(profile.birth_date).slice(0, 10) : '')
       setStreet(profile.street_address || '')
       setComplement(profile.address_complement || '')
       setDistrict(profile.address_district || '')
-      setStateRegion(profile.state_region || '')
-      setPostal(profile.postal_code || '')
+      setStateRegion(String(profile.state_region || '')
+        .toUpperCase()
+        .replace(/[^A-Z]/g, '')
+        .slice(0, 2))
+      const cepMasked = maskCepInput(profile.postal_code || '')
+      setPostal(cepMasked)
       setCountry(profile.country || '')
+      profileCepLookupRef.current = onlyDigits(cepMasked).slice(0, 8)
     }
   }, [profile])
 
+  const profileCepDigits = onlyDigits(postal_code).slice(0, 8)
+  useEffect(() => {
+    if (!profile || profileCepDigits.length !== 8) return
+    if (profileCepDigits === profileCepLookupRef.current) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      setCepLoading(true)
+      try {
+        const addr = await fetchAddressByCep(profileCepDigits)
+        if (cancelled || !addr) return
+        profileCepLookupRef.current = profileCepDigits
+        setStreet((s) => addr.street_address || s)
+        setDistrict((s) => addr.address_district || s)
+        setCity((s) => addr.city || s)
+        setStateRegion((s) => addr.state_region || s)
+      } catch {
+        /* ignorar */
+      } finally {
+        if (!cancelled) setCepLoading(false)
+      }
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [profile, profileCepDigits])
+
   const save = async (e) => {
     e.preventDefault()
-    setMessage('')
     setSaving(true)
     try {
       await api('/profile', {
@@ -73,9 +113,9 @@ export default function ProfilePage() {
         }),
       })
       await refreshMe()
-      setMessage('Salvo.')
+      toast.success('Cadastro salvo com sucesso.')
     } catch (e2) {
-      setMessage(e2.message || 'Erro')
+      toast.error(e2.message || 'Não foi possível salvar o cadastro.')
     } finally {
       setSaving(false)
     }
@@ -83,17 +123,16 @@ export default function ProfilePage() {
 
   const changePassword = async (e) => {
     e.preventDefault()
-    setPasswordMessage('')
     if (newPassword !== confirmPassword) {
-      setPasswordMessage('A confirmação da nova senha não coincide.')
+      toast.error('A confirmação da nova senha não coincide.')
       return
     }
     if (String(newPassword).length < 6) {
-      setPasswordMessage('A nova senha deve ter pelo menos 6 caracteres.')
+      toast.error('A nova senha deve ter pelo menos 6 caracteres.')
       return
     }
     if (!currentPassword) {
-      setPasswordMessage('Digite a senha atual.')
+      toast.error('Digite a senha atual.')
       return
     }
     setPasswordSaving(true)
@@ -105,17 +144,17 @@ export default function ProfilePage() {
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
-      setPasswordMessage('ok')
+      toast.success('Senha alterada com sucesso.')
     } catch (e2) {
-      setPasswordMessage(e2.message || 'Não foi possível alterar a senha')
+      toast.error(e2.message || 'Não foi possível alterar a senha.')
     } finally {
       setPasswordSaving(false)
     }
   }
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold">Perfil e cadastro</h1>
+    <div className="mx-auto w-full min-w-0 max-w-5xl">
+      <h1 className="text-2xl font-bold text-slate-900">Perfil e cadastro</h1>
       <p className="text-slate-600">E-mail: {user?.email} (não editável aqui)</p>
       {profile?.role && (
         <p className="text-sm text-slate-500">
@@ -126,12 +165,20 @@ export default function ProfilePage() {
         </p>
       )}
 
-      <form onSubmit={save} className="mt-6 max-w-2xl space-y-6" aria-busy={saving}>
-        {message && (
-          <p className={`text-sm ${message === 'Salvo.' ? 'text-emerald-700' : 'text-red-600'}`}>{message}</p>
-        )}
+      <section
+        className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+        aria-labelledby="perfil-cadastro-heading"
+      >
+        <h2 id="perfil-cadastro-heading" className="flex items-center gap-2 text-lg font-bold text-slate-900">
+          <User className="h-5 w-5 shrink-0 text-slate-600" aria-hidden />
+          Dados do cadastro
+        </h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Informações pessoais, endereço e links. Use <strong>Salvar</strong> para enviar as alterações ao servidor.
+        </p>
 
-        <fieldset className="space-y-3 rounded-xl border border-slate-200 p-4">
+        <form onSubmit={save} className="mt-4 space-y-6" aria-busy={saving}>
+        <fieldset className="space-y-3 rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <legend className="px-1 text-sm font-semibold text-slate-800">Identificação</legend>
           <div>
             <label className="text-sm text-slate-600">Nome completo</label>
@@ -140,7 +187,14 @@ export default function ProfilePage() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className="text-sm text-slate-600">Telefone</label>
-              <input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <input
+                className={inputClass}
+                value={phone}
+                onChange={(e) => setPhone(maskPhoneBrInput(e.target.value))}
+                inputMode="numeric"
+                autoComplete="tel"
+                placeholder="(00) 00000-0000"
+              />
             </div>
             <div>
               <label className="text-sm text-slate-600">Data de nascimento</label>
@@ -148,7 +202,13 @@ export default function ProfilePage() {
             </div>
             <div>
               <label className="text-sm text-slate-600">CPF</label>
-              <input className={inputClass} value={cpf} onChange={(e) => setCpf(e.target.value)} />
+              <input
+                className={inputClass}
+                value={cpf}
+                onChange={(e) => setCpf(maskCpfInput(e.target.value))}
+                inputMode="numeric"
+                placeholder="000.000.000-00"
+              />
             </div>
             <div>
               <label className="text-sm text-slate-600">RG / documento</label>
@@ -157,8 +217,25 @@ export default function ProfilePage() {
           </div>
         </fieldset>
 
-        <fieldset className="space-y-3 rounded-xl border border-slate-200 p-4">
+        <fieldset className="space-y-3 rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <legend className="px-1 text-sm font-semibold text-slate-800">Endereço</legend>
+          <div className="max-w-xs">
+            <label className="text-sm text-slate-600">CEP</label>
+            <input
+              className={inputClass}
+              value={postal_code}
+              onChange={(e) => {
+                const next = maskCepInput(e.target.value)
+                setPostal(next)
+                if (onlyDigits(next).length !== 8) profileCepLookupRef.current = ''
+              }}
+              inputMode="numeric"
+              autoComplete="postal-code"
+              placeholder="00000-000"
+              aria-busy={cepLoading}
+            />
+            {cepLoading && <p className="mt-1 text-xs text-slate-500">Buscando endereço pelo CEP…</p>}
+          </div>
           <div>
             <label className="text-sm text-slate-600">Logradouro e número</label>
             <input className={inputClass} value={street_address} onChange={(e) => setStreet(e.target.value)} />
@@ -181,14 +258,12 @@ export default function ProfilePage() {
               <input
                 className={inputClass}
                 value={state_region}
-                onChange={(e) => setStateRegion(e.target.value)}
+                onChange={(e) =>
+                  setStateRegion(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2))
+                }
                 maxLength={2}
                 placeholder="SP"
               />
-            </div>
-            <div>
-              <label className="text-sm text-slate-600">CEP</label>
-              <input className={inputClass} value={postal_code} onChange={(e) => setPostal(e.target.value)} />
             </div>
             <div>
               <label className="text-sm text-slate-600">País</label>
@@ -197,7 +272,7 @@ export default function ProfilePage() {
           </div>
         </fieldset>
 
-        <fieldset className="space-y-3 rounded-xl border border-slate-200 p-4">
+        <fieldset className="space-y-3 rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <legend className="px-1 text-sm font-semibold text-slate-800">Links</legend>
           <div>
             <label className="text-sm text-slate-600">LinkedIn</label>
@@ -217,7 +292,7 @@ export default function ProfilePage() {
           {saving ? (
             <>
               <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-              A guardar…
+              Salvando…
             </>
           ) : (
             <>
@@ -226,20 +301,23 @@ export default function ProfilePage() {
             </>
           )}
         </button>
-      </form>
+        </form>
+      </section>
 
-      <form onSubmit={changePassword} className="mt-10 max-w-2xl space-y-4" aria-busy={passwordSaving}>
-        <h2 className="text-lg font-bold text-slate-900">Segurança</h2>
-        {passwordMessage && (
-          <p
-            className={`text-sm ${passwordMessage === 'ok' ? 'text-emerald-700' : 'text-red-600'}`}
-            role="status"
-          >
-            {passwordMessage === 'ok' ? 'Senha alterada com sucesso.' : passwordMessage}
-          </p>
-        )}
+      <section
+        className="mt-10 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
+        aria-labelledby="perfil-seguranca-heading"
+      >
+        <h2 id="perfil-seguranca-heading" className="flex items-center gap-2 text-lg font-bold text-slate-900">
+          <KeyRound className="h-5 w-5 shrink-0 text-slate-600" aria-hidden />
+          Segurança
+        </h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Troque a senha de acesso ao portal informando a senha atual e a nova senha duas vezes para confirmar.
+        </p>
 
-        <fieldset className="space-y-3 rounded-xl border border-slate-200 p-4">
+        <form onSubmit={changePassword} className="mt-4 space-y-4" aria-busy={passwordSaving}>
+        <fieldset className="space-y-3 rounded-lg border border-slate-100 bg-slate-50/60 p-4">
           <legend className="px-1 text-sm font-semibold text-slate-800">Trocar senha</legend>
           <p className="text-xs text-slate-500">É preciso informar a senha atual, a nova senha e a confirmação.</p>
           <div>
@@ -291,7 +369,7 @@ export default function ProfilePage() {
           {passwordSaving ? (
             <>
               <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-              A atualizar…
+              Atualizando…
             </>
           ) : (
             <>
@@ -300,7 +378,8 @@ export default function ProfilePage() {
             </>
           )}
         </button>
-      </form>
+        </form>
+      </section>
     </div>
   )
 }

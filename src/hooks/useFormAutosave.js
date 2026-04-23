@@ -14,7 +14,7 @@ function useResetSkipOnKeyChange(draftKey) {
 /**
  * Grava na API com debounce. Em falha, grava rascunho em localStorage.
  * @param {string} formType
- * @param {string|number|null|undefined} formOwnerUserId — utilizador cujo payload é (aluno) ou, em modo admin, o aluno alvo
+ * @param {string|number|null|undefined} formOwnerUserId — usuário dono do payload (aluno) ou, em modo admin, o aluno alvo
  * @param {boolean} hydrated
  * @param {string} snapshot JSON.stringify do payload — muda quando o form muda
  * @param {number} debounceMs

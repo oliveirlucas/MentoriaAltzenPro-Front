@@ -1,9 +1,19 @@
 import React, { useEffect, useMemo, useState, useId, useRef, useCallback } from 'react'
 import { useParams, Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useToast } from '../context/ToastContext.jsx'
 import { api, apiBlob } from '../lib/api.js'
 import {
+  maskCpfInput,
+  maskPhoneBrInput,
+  maskCepInput,
+  onlyDigits,
+  emailHasValidAt,
+  fetchAddressByCep,
+} from '../lib/brInputs.js'
+import {
   ArrowLeft,
+  Loader2,
   Save,
   User,
   Activity,
@@ -100,7 +110,7 @@ function fileToBase64(file) {
       const i = s.indexOf(',')
       resolve(i >= 0 ? s.slice(i + 1) : s)
     }
-    reader.onerror = () => reject(new Error('Leitura do ficheiro falhou'))
+    reader.onerror = () => reject(new Error('Leitura do arquivo falhou'))
     reader.readAsDataURL(file)
   })
 }
@@ -108,8 +118,9 @@ function fileToBase64(file) {
 export default function AdminStudentDetail() {
   const { id } = useParams()
   const { profile, loading: authLoad } = useAuth()
+  const toast = useToast()
   const [data, setData] = useState(null)
-  const [err, setErr] = useState('')
+  const [initialLoadErr, setInitialLoadErr] = useState('')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [noteVisibleToStudent, setNoteVisibleToStudent] = useState(true)
@@ -138,8 +149,9 @@ export default function AdminStudentDetail() {
   const [cadCountry, setCadCountry] = useState('')
   const [cadPassword, setCadPassword] = useState('')
   const [cadBusy, setCadBusy] = useState(false)
-  const [cadMsg, setCadMsg] = useState('')
+  const [cadCepLoading, setCadCepLoading] = useState(false)
   const [cadModalOpen, setCadModalOpen] = useState(false)
+  const cadCepLastLookupRef = useRef('')
   const cadModalTitleId = useId()
   const contractInputRef = useRef(null)
   const [contractBusy, setContractBusy] = useState(false)
@@ -160,17 +172,16 @@ export default function AdminStudentDetail() {
   const patchStudentPortalAccess = useCallback(async (partial) => {
     if (!id) return
     setPortalAccessBusy(true)
-    setErr('')
     try {
       await api(`/admin/students/${id}`, { method: 'PATCH', body: JSON.stringify(partial) })
       const d = await api(`/admin/students/${id}`)
       setData(d)
     } catch (e) {
-      setErr(e?.message || 'Não foi possível atualizar o acesso.')
+      toast.error(e?.message || 'Não foi possível atualizar o acesso.')
     } finally {
       setPortalAccessBusy(false)
     }
-  }, [id])
+  }, [id, toast])
 
   const studentSyncKey = useMemo(() => {
     if (!data?.student) return ''
@@ -200,25 +211,52 @@ export default function AdminStudentDetail() {
     const u = data.student
     setCadEmail(u.email || '')
     setCadFullName(u.full_name || '')
-    setCadPhone(u.phone || '')
+    setCadPhone(maskPhoneBrInput(u.phone || ''))
     setCadCity(u.city || '')
     setCadLinkedin(u.linkedin || '')
     setCadGithub(u.github || '')
-    setCadCpf(u.cpf || '')
+    setCadCpf(maskCpfInput(u.cpf || ''))
     setCadRg(u.rg || '')
     setCadBirthDate(u.birth_date ? toDateInput(u.birth_date) : '')
     setCadStreet(u.street_address || '')
     setCadComplement(u.address_complement || '')
     setCadDistrict(u.address_district || '')
-    setCadState(u.state_region || '')
-    setCadPostal(u.postal_code || '')
+    setCadState((u.state_region || '').toUpperCase().slice(0, 2))
+    setCadPostal(maskCepInput(u.postal_code || ''))
     setCadCountry(u.country || '')
     setCadPassword('')
+    cadCepLastLookupRef.current = onlyDigits(u.postal_code || '').slice(0, 8)
   }, [cadModalOpen, studentSyncKey])
+
+  const cadCepDigits = onlyDigits(cadPostal).slice(0, 8)
+  useEffect(() => {
+    if (!cadModalOpen || cadCepDigits.length !== 8) return
+    if (cadCepDigits === cadCepLastLookupRef.current) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      setCadCepLoading(true)
+      try {
+        const addr = await fetchAddressByCep(cadCepDigits)
+        if (cancelled || !addr) return
+        cadCepLastLookupRef.current = cadCepDigits
+        setCadStreet((s) => addr.street_address || s)
+        setCadDistrict((s) => addr.address_district || s)
+        setCadCity((s) => addr.city || s)
+        setCadState((s) => addr.state_region || s)
+      } catch {
+        /* ignorar falha de rede */
+      } finally {
+        if (!cancelled) setCadCepLoading(false)
+      }
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [cadModalOpen, cadCepDigits])
 
   useEffect(() => {
     setCadModalOpen(false)
-    setCadMsg('')
     setNewCycleModalOpen(false)
     setContractDeleteTarget(null)
     setTitle('')
@@ -273,14 +311,14 @@ export default function AdminStudentDetail() {
   useEffect(() => {
     if (profile?.role !== 'admin') return
     setData(null)
-    setErr('')
+    setInitialLoadErr('')
     let ok = true
     ;(async () => {
       try {
         const d = await api(`/admin/students/${id}`)
         if (ok) setData(d)
       } catch (e) {
-        if (ok) setErr(e.message)
+        if (ok) setInitialLoadErr(e.message || 'Não foi possível carregar o aluno.')
       }
     })()
     return () => {
@@ -326,14 +364,14 @@ export default function AdminStudentDetail() {
       const w = window.open(url, '_blank', 'noopener,noreferrer')
       if (!w) {
         URL.revokeObjectURL(url)
-        setErr('O browser bloqueou a nova janela. Permita pop-ups ou use transferência.')
+        toast.error('O navegador bloqueou a nova janela. Permita pop-ups ou use o download.')
         return
       }
       setTimeout(() => URL.revokeObjectURL(url), 120_000)
     } catch (e) {
-      setErr(e?.message || 'Não foi possível abrir o anexo.')
+      toast.error(e?.message || 'Não foi possível abrir o anexo.')
     }
-  }, [])
+  }, [toast])
 
   const saveNote = async (e) => {
     e.preventDefault()
@@ -349,10 +387,9 @@ export default function AdminStudentDetail() {
         ? noteExistingFiles.filter((f) => !noteRemovedFileIds.includes(f.id)).length
         : 0
     if (existingKept + notePendingFiles.length > NOTE_ANEXOS_MAX) {
-      setErr(`No máximo ${NOTE_ANEXOS_MAX} anexos por nota (existentes + novos).`)
+      toast.error(`No máximo ${NOTE_ANEXOS_MAX} anexos por nota (existentes + novos).`)
       return
     }
-    setErr('')
     setNoteSaving(true)
     try {
       let attachment_files
@@ -392,8 +429,9 @@ export default function AdminStudentDetail() {
       resetNoteComposer()
       const d = await api(`/admin/students/${id}`)
       setData(d)
+      toast.success('Nota guardada.')
     } catch (err) {
-      setErr(err?.message || 'Erro ao guardar a nota.')
+      toast.error(err?.message || 'Erro ao salvar a nota.')
     } finally {
       setNoteSaving(false)
     }
@@ -401,7 +439,6 @@ export default function AdminStudentDetail() {
 
   const updateEnrollment = async (enrollment, patch) => {
     try {
-      setErr('')
       await api(`/admin/enrollments/${enrollment.id}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
@@ -409,14 +446,13 @@ export default function AdminStudentDetail() {
       const d = await api(`/admin/students/${id}`)
       setData(d)
     } catch (e) {
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível atualizar a inscrição.')
     }
   }
 
   const addMentorshipCycle = async () => {
     if (!id) return
     setAddCycleBusy(true)
-    setErr('')
     try {
       await api('/admin/enrollments', {
         method: 'POST',
@@ -425,8 +461,9 @@ export default function AdminStudentDetail() {
       const d = await api(`/admin/students/${id}`)
       setData(d)
       setNewCycleModalOpen(false)
+      toast.success('Nova inscrição criada.')
     } catch (e) {
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível criar a inscrição.')
     } finally {
       setAddCycleBusy(false)
     }
@@ -435,7 +472,6 @@ export default function AdminStudentDetail() {
   const snapshotFormsForEnrollment = async (enrollmentId) => {
     if (!id) return
     setSnapBusyId(enrollmentId)
-    setErr('')
     try {
       await api(`/admin/students/${id}/enrollments/${enrollmentId}/snapshot-forms`, {
         method: 'POST',
@@ -443,8 +479,9 @@ export default function AdminStudentDetail() {
       })
       const d = await api(`/admin/students/${id}`)
       setData(d)
+      toast.success('Cópia dos formulários guardada para este ciclo.')
     } catch (e) {
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível arquivar os formulários.')
     } finally {
       setSnapBusyId(null)
     }
@@ -480,7 +517,6 @@ export default function AdminStudentDetail() {
 
   const openContractPreview = async (contractId, label) => {
     if (!id || contractId == null) return
-    setErr('')
     setContractPreviewLabel(label || 'Contrato')
     try {
       const { blob, contentType } = await apiBlob(
@@ -496,7 +532,7 @@ export default function AdminStudentDetail() {
       setContractPreviewOpen(true)
     } catch (e) {
       setContractPreviewLabel('')
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível abrir o contrato.')
     }
   }
 
@@ -507,15 +543,14 @@ export default function AdminStudentDetail() {
     const mime = (file.type || '').toLowerCase().split(';')[0].trim()
     const allowed = ['application/pdf', 'image/png', 'image/jpeg']
     if (!allowed.includes(mime)) {
-      setErr('Use PDF ou imagem PNG/JPEG.')
+      toast.error('Use PDF ou imagem PNG/JPEG.')
       return
     }
     if (file.size > 8 * 1024 * 1024) {
-      setErr('Ficheiro demasiado grande (máx. 8 MB).')
+      toast.error('Arquivo muito grande (máx. 8 MB).')
       return
     }
     setContractBusy(true)
-    setErr('')
     try {
       const data_base64 = await fileToBase64(file)
       await api(`/admin/students/${id}/contracts`, {
@@ -528,8 +563,9 @@ export default function AdminStudentDetail() {
       })
       const d = await api(`/admin/students/${id}`)
       setData(d)
+      toast.success('Contrato enviado.')
     } catch (e) {
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível enviar o contrato.')
     } finally {
       setContractBusy(false)
     }
@@ -539,14 +575,14 @@ export default function AdminStudentDetail() {
     if (!id || !contractDeleteTarget) return
     const contractId = contractDeleteTarget.id
     setContractDeleteBusy(true)
-    setErr('')
     try {
       await api(`/admin/students/${id}/contracts/${contractId}`, { method: 'DELETE' })
       const d = await api(`/admin/students/${id}`)
       setData(d)
       setContractDeleteTarget(null)
+      toast.success('Contrato removido.')
     } catch (e) {
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível remover o contrato.')
     } finally {
       setContractDeleteBusy(false)
     }
@@ -555,9 +591,11 @@ export default function AdminStudentDetail() {
   const saveCadastro = async (e) => {
     e.preventDefault()
     if (!id) return
+    if (!emailHasValidAt(cadEmail)) {
+      toast.error('Informe um e-mail válido (deve conter @).')
+      return
+    }
     setCadBusy(true)
-    setErr('')
-    setCadMsg('')
     try {
       const body = {
         email: cadEmail.trim(),
@@ -586,9 +624,9 @@ export default function AdminStudentDetail() {
       const d = await api(`/admin/students/${id}`)
       setData(d)
       setCadPassword('')
-      setCadMsg('Cadastro atualizado.')
+      toast.success('Cadastro salvo com sucesso.')
     } catch (e) {
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível salvar o cadastro.')
     } finally {
       setCadBusy(false)
     }
@@ -678,7 +716,7 @@ export default function AdminStudentDetail() {
     )
   }
   if (profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
-  if (err && !data) return <p className="text-red-600">{err}</p>
+  if (initialLoadErr && !data) return <p className="text-red-600">{initialLoadErr}</p>
   if (!data) return <p className="text-slate-500">Carregando…</p>
 
   const s = data.student
@@ -694,12 +732,6 @@ export default function AdminStudentDetail() {
 
   return (
     <div className="space-y-8 pb-12">
-      {err && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
-          {err}
-        </p>
-      )}
-
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <Link
           to="/admin"
@@ -776,7 +808,8 @@ export default function AdminStudentDetail() {
         <h2 className="text-base font-bold text-slate-900">Acesso no portal (aluno)</h2>
         <p className="mt-1 text-sm text-slate-600">
           Novos alunos começam com diagnóstico e plano bloqueados no portal. Ao ativar abaixo, o aluno passa a ver os
-          menus, o painel e pode gravar. Você continua podendo abrir e editar pela ficha de admin.
+          menus e o painel e pode preencher e salvar os formulários. Você continua podendo abrir e editar pela ficha de
+          administração.
         </p>
         <ul className="mt-4 space-y-3">
           <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50/80 px-4 py-3">
@@ -856,9 +889,9 @@ export default function AdminStudentDetail() {
             </div>
             <p className="mt-1 text-sm font-semibold text-slate-800">{formatPt(health.lastPlanoAt)}</p>
             {health.daysSincePlano != null && (
-              <p className="mt-1 text-xs text-slate-600">Há {health.daysSincePlano} dia(s) sem registo (autosave).</p>
+              <p className="mt-1 text-xs text-slate-600">Há {health.daysSincePlano} dia(s) sem registro (salvamento automático).</p>
             )}
-            {!health.hasPlano && <p className="mt-1 text-xs text-amber-700">Nenhum plano guardado ainda.</p>}
+            {!health.hasPlano && <p className="mt-1 text-xs text-amber-700">Nenhum plano salvo ainda.</p>}
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 text-slate-500">
@@ -883,8 +916,8 @@ export default function AdminStudentDetail() {
             O quadro de ritmo no topo corresponde só à inscrição mais recente. Aqui mantém-se o contexto das linhas
             anteriores (datas e dia/semana calculados com base no início de cada uma; se existir data de fim, usa-se
             essa data como referência do “dia no programa”). Quando uma linha passa a <strong>concluída</strong> ou{' '}
-            <strong>encerrada</strong>, o portal grava automaticamente uma cópia do diagnóstico e do plano daquele
-            momento — abra com os botões abaixo (imprimir / PDF no ecrã seguinte).
+            <strong>encerrada</strong>, o portal salva automaticamente uma cópia do diagnóstico e do plano daquele
+            momento — abra com os botões abaixo (imprimir / PDF na tela seguinte).
           </p>
           <ul className="mt-4 space-y-3">
             {data.enrollments
@@ -964,15 +997,18 @@ export default function AdminStudentDetail() {
                           <p className="mb-2">
                             {!hasDiagArch && !hasPlanoArch
                               ? 'Ainda não há arquivo de formulários para este ciclo (vazio no encerramento ou encerrado antes desta funcionalidade).'
-                              : 'Falta parte do arquivo. Pode gravar uma cópia com os formulários que estão agora no portal — atenção: isso reflete o estado atual, não o passado, se já foram alterados para o ciclo novo.'}
+                              : 'Falta parte do arquivo. Você pode salvar uma cópia com os formulários que estão agora no portal — atenção: isso reflete o estado atual, não o passado, se já foram alterados para o ciclo novo.'}
                           </p>
                           <button
                             type="button"
                             disabled={snapBusyId === en.id}
                             onClick={() => snapshotFormsForEnrollment(en.id)}
-                            className="inline-flex min-h-[40px] items-center rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+                            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-50"
                           >
-                            {snapBusyId === en.id ? 'A gravar…' : 'Arquivar formulários atuais nesta inscrição'}
+                            {snapBusyId === en.id ? (
+                              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                            ) : null}
+                            {snapBusyId === en.id ? 'Salvando…' : 'Arquivar formulários atuais nesta inscrição'}
                           </button>
                         </div>
                       )}
@@ -1018,7 +1054,11 @@ export default function AdminStudentDetail() {
             onClick={() => setNewCycleModalOpen(true)}
             className="inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg bg-indigo-700 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
           >
-            <Plus className="h-4 w-4 shrink-0" aria-hidden />
+            {addCycleBusy ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            ) : (
+              <Plus className="h-4 w-4 shrink-0" aria-hidden />
+            )}
             Nova inscrição (novo ciclo)
           </button>
         </div>
@@ -1029,18 +1069,18 @@ export default function AdminStudentDetail() {
             produto <strong>Individual · 90 dias</strong>.
           </p>
           <p className="mt-2">
-            <strong>Formulários ativos</strong> (diagnóstico e plano) são <strong>um registo por aluno</strong> no
+            <strong>Formulários ativos</strong> (diagnóstico e plano) são <strong>um registro por aluno</strong> no
             portal. Ao encerrar uma inscrição como <strong>concluída</strong> ou <strong>encerrada</strong>, o sistema
-            guarda uma <strong>cópia</strong> ligada a essa linha (links na própria linha quando está encerrada e em{' '}
+            salva uma <strong>cópia</strong> vinculada a essa linha (links na própria linha quando está encerrada e em{' '}
             <strong>Ciclos anteriores</strong>). Se a <strong>inscrição atual</strong> voltar a <strong>ativa</strong> e
             já existir cópia de um encerramento anterior, os links aparecem num bloco separado «último encerramento desta
             inscrição» — não confundir com o ciclo anterior nem com o formulário ao vivo.
-            O resumo abaixo e as páginas de edição mostram sempre o último guardado ao vivo.
+            O resumo abaixo e as páginas de edição mostram sempre o último salvamento ao vivo.
           </p>
         </div>
         {(!data.enrollments || data.enrollments.length === 0) && (
           <p className="mt-4 text-slate-600">
-            Sem inscrição registada — use <strong>Nova inscrição</strong> ou crie o aluno pelo dashboard.
+            Sem inscrição registrada — use <strong>Nova inscrição</strong> ou crie o aluno pelo painel.
           </p>
         )}
         {data.enrollments && data.enrollments.length > 0 && (
@@ -1141,9 +1181,12 @@ export default function AdminStudentDetail() {
                           type="button"
                           disabled={snapBusyId === en.id}
                           onClick={() => snapshotFormsForEnrollment(en.id)}
-                          className="inline-flex min-h-[40px] items-center rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-50 sm:text-sm"
+                          className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-50 sm:text-sm"
                         >
-                          {snapBusyId === en.id ? 'A gravar…' : 'Arquivar formulários atuais nesta inscrição'}
+                          {snapBusyId === en.id ? (
+                            <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                          ) : null}
+                          {snapBusyId === en.id ? 'Salvando…' : 'Arquivar formulários atuais nesta inscrição'}
                         </button>
                       )}
                     </div>
@@ -1154,7 +1197,7 @@ export default function AdminStudentDetail() {
                         Arquivo do último encerramento desta inscrição (#{eid})
                       </p>
                       <p className="mt-1 leading-snug text-slate-600">
-                        Cópia guardada quando esta <strong>mesma linha</strong> esteve concluída ou encerrada antes de
+                        Cópia salva quando esta <strong>mesma linha</strong> esteve concluída ou encerrada antes de
                         voltar a ativa. Não corresponde ao formulário ao vivo dos cartões no topo (nem ao arquivo das
                         inscrições anteriores na secção «Ciclos anteriores»).
                       </p>
@@ -1212,7 +1255,7 @@ export default function AdminStudentDetail() {
         </div>
         <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total registado</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total registrado</p>
             <p className="mt-1 text-2xl font-bold text-slate-900">{calCounts.total}</p>
           </div>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
@@ -1294,7 +1337,7 @@ export default function AdminStudentDetail() {
           Contratos assinados
         </h2>
         <p className="mb-4 text-sm text-slate-600">
-          Importe um ou mais PDFs ou imagens (PNG/JPEG). Cada envio acrescenta um novo documento; pode eliminar ficheiros individualmente.
+          Importe um ou mais PDFs ou imagens (PNG/JPEG). Cada envio adiciona um novo documento; você pode excluir arquivos individualmente.
         </p>
         <input
           ref={contractInputRef}
@@ -1344,7 +1387,9 @@ export default function AdminStudentDetail() {
           onClick={() => contractInputRef.current?.click()}
           className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 hover:border-indigo-300 hover:bg-indigo-50/50 disabled:opacity-60"
         >
-          {contracts.length > 0 ? (
+          {contractBusy ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+          ) : contracts.length > 0 ? (
             <Plus className="h-4 w-4 shrink-0" aria-hidden />
           ) : (
             <Upload className="h-4 w-4 shrink-0" aria-hidden />
@@ -1367,8 +1412,8 @@ export default function AdminStudentDetail() {
           </div>
           {diagStaleForCurrentCycle ? (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-              O último guardado no portal é <strong>anterior</strong> à inscrição atual (novo ciclo), por isso este
-              resumo não reflete o período em curso. Abra <strong>Editar</strong> para gravar o diagnóstico alinhado a
+              O último salvamento no portal é <strong>anterior</strong> à inscrição atual (novo ciclo), por isso este
+              resumo não reflete o período em curso. Abra <strong>Editar</strong> para salvar o diagnóstico alinhado a
               este ciclo.
             </p>
           ) : diagSummary ? (
@@ -1397,7 +1442,7 @@ export default function AdminStudentDetail() {
               )}
             </dl>
           ) : (
-            <p className="text-slate-600">Ainda sem dados de diagnóstico guardados.</p>
+            <p className="text-slate-600">Ainda sem dados de diagnóstico salvos.</p>
           )}
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -1412,7 +1457,7 @@ export default function AdminStudentDetail() {
           </div>
           {planoStaleForCurrentCycle ? (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-              O último guardado no portal é <strong>anterior</strong> à inscrição atual (novo ciclo), por isso este
+              O último salvamento no portal é <strong>anterior</strong> à inscrição atual (novo ciclo), por isso este
               resumo não reflete o período em curso. Abra <strong>Editar</strong> para atualizar o plano a este ciclo.
             </p>
           ) : planoSummary ? (
@@ -1424,7 +1469,7 @@ export default function AdminStudentDetail() {
               </p>
             </div>
           ) : (
-            <p className="text-slate-600">Ainda sem plano guardado.</p>
+            <p className="text-slate-600">Ainda sem plano salvo.</p>
           )}
         </div>
       </div>
@@ -1436,7 +1481,7 @@ export default function AdminStudentDetail() {
           Histórico
         </h2>
         <p className="mb-6 text-sm text-slate-600">Notas do mentor, envios de formulários e criação de inscrição (mais recente primeiro).</p>
-        {timeline.length === 0 && <p className="text-slate-500">Sem eventos registados ainda.</p>}
+        {timeline.length === 0 && <p className="text-slate-500">Sem eventos registrados ainda.</p>}
         {timeline.length > 0 && (
           <ol className="ml-0.5 space-y-0 border-l-2 border-slate-200 pl-5">
             {timeline.map((ev) => {
@@ -1679,10 +1724,14 @@ export default function AdminStudentDetail() {
           <button
             type="submit"
             disabled={noteSaving}
-            className="inline-flex min-h-[44px] items-center justify-center gap-1 rounded-lg bg-indigo-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-800 disabled:opacity-60"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-800 disabled:opacity-60"
           >
-            <Save className="h-4 w-4" />
-            {noteSaving ? 'A guardar…' : editingNoteId != null ? 'Guardar alterações' : 'Enviar nota'}
+            {noteSaving ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            ) : (
+              <Save className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+            {noteSaving ? 'Salvando…' : editingNoteId != null ? 'Salvar alterações' : 'Enviar nota'}
           </button>
         </form>
       </section>
@@ -1708,7 +1757,7 @@ export default function AdminStudentDetail() {
             </h2>
             <p className="mt-3 text-sm text-slate-600">
               Será criada uma <strong>nova inscrição</strong> (Individual · 90 dias). O ritmo no topo da ficha passará a
-              seguir esta linha. Confirme apenas se for intencional — não é possível apagar inscrições aqui.
+              seguir esta linha. Confirme apenas se for intencional — não é possível excluir inscrições aqui.
             </p>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
@@ -1723,8 +1772,11 @@ export default function AdminStudentDetail() {
                 type="button"
                 disabled={addCycleBusy}
                 onClick={addMentorshipCycle}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
               >
+                {addCycleBusy ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                ) : null}
                 {addCycleBusy ? 'A criar…' : 'Sim, criar novo ciclo'}
               </button>
             </div>
@@ -1752,8 +1804,8 @@ export default function AdminStudentDetail() {
               Remover contrato?
             </h2>
             <p className="mt-3 text-sm text-slate-600">
-              O ficheiro <strong className="break-all font-medium text-slate-900">{contractDeleteTarget.file_name}</strong>{' '}
-              será apagado da ficha deste aluno. Esta ação não pode ser desfeita.
+              O arquivo <strong className="break-all font-medium text-slate-900">{contractDeleteTarget.file_name}</strong>{' '}
+              será removido da ficha deste aluno. Esta ação não pode ser desfeita.
             </p>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
@@ -1768,8 +1820,11 @@ export default function AdminStudentDetail() {
                 type="button"
                 disabled={contractDeleteBusy}
                 onClick={confirmRemoveContract}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-red-200 bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
               >
+                {contractDeleteBusy ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                ) : null}
                 {contractDeleteBusy ? 'A remover…' : 'Sim, remover'}
               </button>
             </div>
@@ -1808,10 +1863,9 @@ export default function AdminStudentDetail() {
               </button>
             </div>
             <p className="mb-4 text-sm text-slate-600">
-              E-mail de acesso, dados pessoais e morada. Nova senha (mín. 6 caracteres) só se quiser alterar — deixe em
+              E-mail de acesso, dados pessoais e endereço. Nova senha (mín. 6 caracteres) só se quiser alterar — deixe em
               branco para manter.
             </p>
-            {cadMsg && <p className="mb-3 text-sm font-medium text-emerald-700">{cadMsg}</p>}
             <form onSubmit={saveCadastro} className="grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Acesso</p>
@@ -1819,12 +1873,14 @@ export default function AdminStudentDetail() {
               <div className="sm:col-span-2">
                 <label className="text-xs font-medium uppercase text-slate-500">E-mail</label>
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
                   required
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={cadEmail}
                   onChange={(e) => setCadEmail(e.target.value)}
-                  autoComplete="off"
+                  autoComplete="email"
+                  placeholder="nome@exemplo.com"
                 />
               </div>
               <div className="sm:col-span-2">
@@ -1854,9 +1910,12 @@ export default function AdminStudentDetail() {
                 <label className="text-xs font-medium uppercase text-slate-500">Telefone</label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  autoComplete="tel"
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={cadPhone}
-                  onChange={(e) => setCadPhone(e.target.value)}
+                  onChange={(e) => setCadPhone(maskPhoneBrInput(e.target.value))}
+                  placeholder="(00) 00000-0000"
                 />
               </div>
               <div>
@@ -1872,9 +1931,11 @@ export default function AdminStudentDetail() {
                 <label className="text-xs font-medium uppercase text-slate-500">CPF</label>
                 <input
                   type="text"
+                  inputMode="numeric"
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={cadCpf}
-                  onChange={(e) => setCadCpf(e.target.value)}
+                  onChange={(e) => setCadCpf(maskCpfInput(e.target.value))}
+                  placeholder="000.000.000-00"
                 />
               </div>
               <div>
@@ -1888,6 +1949,26 @@ export default function AdminStudentDetail() {
               </div>
               <div className="sm:col-span-2 mt-2 border-t border-slate-100 pt-4">
                 <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Endereço</p>
+              </div>
+              <div className="sm:col-span-2 sm:max-w-xs">
+                <label className="text-xs font-medium uppercase text-slate-500">CEP</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={cadPostal}
+                  onChange={(e) => {
+                    const next = maskCepInput(e.target.value)
+                    setCadPostal(next)
+                    if (onlyDigits(next).length !== 8) cadCepLastLookupRef.current = ''
+                  }}
+                  placeholder="00000-000"
+                  aria-busy={cadCepLoading}
+                />
+                {cadCepLoading && (
+                  <p className="mt-1 text-xs text-slate-500">Buscando endereço pelo CEP…</p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <label className="text-xs font-medium uppercase text-slate-500">Logradouro e número</label>
@@ -1932,17 +2013,10 @@ export default function AdminStudentDetail() {
                   maxLength={2}
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={cadState}
-                  onChange={(e) => setCadState(e.target.value)}
+                  onChange={(e) =>
+                    setCadState(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2))
+                  }
                   placeholder="SP"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium uppercase text-slate-500">CEP</label>
-                <input
-                  type="text"
-                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  value={cadPostal}
-                  onChange={(e) => setCadPostal(e.target.value)}
                 />
               </div>
               <div>
@@ -1983,8 +2057,12 @@ export default function AdminStudentDetail() {
                   disabled={cadBusy}
                   className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
                 >
-                  <Save className="h-4 w-4" />
-                  {cadBusy ? 'A guardar…' : 'Guardar cadastro'}
+                  {cadBusy ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                  ) : (
+                    <Save className="h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                  {cadBusy ? 'Salvando…' : 'Salvar cadastro'}
                 </button>
                 <button
                   type="button"

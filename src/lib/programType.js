@@ -10,7 +10,7 @@ const LABELS = {
 }
 
 /**
- * Rótulo curto para listas e fichas (inclui códigos antigos na base).
+ * Rótulo curto para listas e fichas de aluno (inclui códigos antigos no banco).
  * @param {string|null|undefined} slug
  */
 export function formatProgramType(slug) {

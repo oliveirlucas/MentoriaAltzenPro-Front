@@ -1,8 +1,17 @@
-import React, { useState, useEffect, useId } from 'react'
-import { X } from 'lucide-react'
+import React, { useState, useEffect, useId, useRef } from 'react'
+import { Loader2, X } from 'lucide-react'
 import { api } from '../lib/api.js'
+import { useToast } from '../context/ToastContext.jsx'
 import { emitAdminStudentsRefresh } from '../lib/adminEvents.js'
 import { DEFAULT_MENTORSHIP_PROGRAM, formatProgramType } from '../lib/programType.js'
+import {
+  maskCpfInput,
+  maskPhoneBrInput,
+  maskCepInput,
+  onlyDigits,
+  emailHasValidAt,
+  fetchAddressByCep,
+} from '../lib/brInputs.js'
 
 const emptyForm = () => ({
   email: '',
@@ -24,19 +33,21 @@ const emptyForm = () => ({
 })
 
 export default function AdminCreateStudentModal({ open, onClose }) {
+  const toast = useToast()
   const [form, setForm] = useState(emptyForm)
-  const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
+  const [cepLoading, setCepLoading] = useState(false)
   const titleId = useId()
+  const lastCepLookupRef = useRef('')
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
     if (!open) {
-      setMessage('')
       return
     }
     setForm(emptyForm())
+    lastCepLookupRef.current = ''
     const onKey = (e) => {
       if (e.key === 'Escape') onClose()
     }
@@ -48,9 +59,42 @@ export default function AdminCreateStudentModal({ open, onClose }) {
     }
   }, [open, onClose])
 
+  const cepDigits = onlyDigits(form.postal_code).slice(0, 8)
+  useEffect(() => {
+    if (!open || cepDigits.length !== 8) return
+    if (cepDigits === lastCepLookupRef.current) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      setCepLoading(true)
+      try {
+        const addr = await fetchAddressByCep(cepDigits)
+        if (cancelled || !addr) return
+        lastCepLookupRef.current = cepDigits
+        setForm((f) => ({
+          ...f,
+          street_address: addr.street_address || f.street_address,
+          address_district: addr.address_district || f.address_district,
+          city: addr.city || f.city,
+          state_region: addr.state_region || f.state_region,
+        }))
+      } catch {
+        /* ViaCEP indisponível — ignora */
+      } finally {
+        if (!cancelled) setCepLoading(false)
+      }
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [open, cepDigits])
+
   const submit = async (e) => {
     e.preventDefault()
-    setMessage('')
+    if (!emailHasValidAt(form.email)) {
+      toast.error('Informe um e-mail válido (deve conter @).')
+      return
+    }
     setSaving(true)
     try {
       const body = {
@@ -77,9 +121,10 @@ export default function AdminCreateStudentModal({ open, onClose }) {
       })
       setForm(emptyForm())
       emitAdminStudentsRefresh()
+      toast.success('Aluno criado com sucesso.')
       onClose()
     } catch (err) {
-      setMessage(err.message || 'Erro ao criar conta')
+      toast.error(err.message || 'Erro ao criar conta.')
     } finally {
       setSaving(false)
     }
@@ -136,8 +181,10 @@ export default function AdminCreateStudentModal({ open, onClose }) {
                   value={form.email}
                   onChange={(e) => set('email', e.target.value)}
                   required
-                  type="email"
-                  autoComplete="off"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="nome@exemplo.com"
                 />
               </div>
               <div className="sm:col-span-2">
@@ -164,7 +211,14 @@ export default function AdminCreateStudentModal({ open, onClose }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium text-slate-600">Telefone</label>
-                <input className={inputCls} value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+                <input
+                  className={inputCls}
+                  value={form.phone}
+                  onChange={(e) => set('phone', maskPhoneBrInput(e.target.value))}
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder="(00) 00000-0000"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">Data de nascimento</label>
@@ -177,7 +231,14 @@ export default function AdminCreateStudentModal({ open, onClose }) {
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">CPF</label>
-                <input className={inputCls} value={form.cpf} onChange={(e) => set('cpf', e.target.value)} />
+                <input
+                  className={inputCls}
+                  value={form.cpf}
+                  onChange={(e) => set('cpf', maskCpfInput(e.target.value))}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="000.000.000-00"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">RG / documento</label>
@@ -188,6 +249,25 @@ export default function AdminCreateStudentModal({ open, onClose }) {
 
           <fieldset className="space-y-3 rounded-xl border border-slate-200 p-4">
             <legend className="px-1 text-sm font-semibold text-slate-800">Endereço</legend>
+            <div className="max-w-xs">
+              <label className="text-xs font-medium text-slate-600">CEP</label>
+              <input
+                className={inputCls}
+                value={form.postal_code}
+                onChange={(e) => {
+                  const next = maskCepInput(e.target.value)
+                  set('postal_code', next)
+                  if (onlyDigits(next).length !== 8) lastCepLookupRef.current = ''
+                }}
+                inputMode="numeric"
+                autoComplete="postal-code"
+                placeholder="00000-000"
+                aria-busy={cepLoading}
+              />
+              {cepLoading && (
+                <p className="mt-1 text-xs text-slate-500">Buscando endereço pelo CEP…</p>
+              )}
+            </div>
             <div>
               <label className="text-xs font-medium text-slate-600">Logradouro e número</label>
               <input
@@ -222,14 +302,10 @@ export default function AdminCreateStudentModal({ open, onClose }) {
                 <input
                   className={inputCls}
                   value={form.state_region}
-                  onChange={(e) => set('state_region', e.target.value)}
+                  onChange={(e) => set('state_region', e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2))}
                   maxLength={2}
                   placeholder="SP"
                 />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-600">CEP</label>
-                <input className={inputCls} value={form.postal_code} onChange={(e) => set('postal_code', e.target.value)} />
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">País</label>
@@ -262,7 +338,6 @@ export default function AdminCreateStudentModal({ open, onClose }) {
             </div>
           </fieldset>
 
-          {message && <p className="text-sm text-red-600">{message}</p>}
           <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
             <button
               type="button"
@@ -274,9 +349,16 @@ export default function AdminCreateStudentModal({ open, onClose }) {
             <button
               type="submit"
               disabled={saving}
-              className="rounded-lg bg-indigo-800 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-800 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              {saving ? 'Criando…' : 'Criar aluno'}
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                  Criando…
+                </>
+              ) : (
+                'Criar aluno'
+              )}
             </button>
           </div>
         </form>

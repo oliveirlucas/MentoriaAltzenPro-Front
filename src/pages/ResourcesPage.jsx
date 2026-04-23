@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useToast } from '../context/ToastContext.jsx'
 import { api, apiBlob } from '../lib/api.js'
 import { ScrollText, Eye, X, Link2, Paperclip } from 'lucide-react'
 
@@ -13,10 +14,10 @@ function formatPt(iso) {
 
 export default function ResourcesPage() {
   const { profile, loading: authLoading } = useAuth()
+  const toast = useToast()
   const loc = useLocation()
   const [notes, setNotes] = useState([])
   const [contracts, setContracts] = useState([])
-  const [contractsErr, setContractsErr] = useState('')
   const [contractsLoading, setContractsLoading] = useState(true)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -48,13 +49,12 @@ export default function ResourcesPage() {
     }
     let ok = true
     setContractsLoading(true)
-    setContractsErr('')
     ;(async () => {
       try {
         const d = await api('/me/contracts')
         if (ok) setContracts(d.contracts || [])
       } catch (e) {
-        if (ok) setContractsErr(e.message || 'Não foi possível carregar os contratos.')
+        if (ok) toast.error(e.message || 'Não foi possível carregar os contratos.')
       } finally {
         if (ok) setContractsLoading(false)
       }
@@ -62,7 +62,7 @@ export default function ResourcesPage() {
     return () => {
       ok = false
     }
-  }, [authLoading, profile?.role])
+  }, [authLoading, profile?.role, toast])
 
   useEffect(() => {
     if (loc.hash !== '#contratos') return
@@ -101,7 +101,6 @@ export default function ResourcesPage() {
   }, [previewOpen, closePreview])
 
   const openNoteAttachmentPreview = async (fileId, label) => {
-    setContractsErr('')
     setPreviewLabel(label || 'Anexo')
     try {
       const { blob, contentType } = await apiBlob(`/me/mentor-note-files/${fileId}/file`)
@@ -115,12 +114,11 @@ export default function ResourcesPage() {
       setPreviewOpen(true)
     } catch (e) {
       setPreviewLabel('')
-      setContractsErr(e.message || 'Não foi possível abrir o anexo.')
+      toast.error(e.message || 'Não foi possível abrir o anexo.')
     }
   }
 
   const openPreview = async (contractId, label) => {
-    setContractsErr('')
     setPreviewLabel(label || 'Contrato')
     try {
       const { blob, contentType } = await apiBlob(`/me/contracts/${contractId}/file`)
@@ -134,7 +132,7 @@ export default function ResourcesPage() {
       setPreviewOpen(true)
     } catch (e) {
       setPreviewLabel('')
-      setContractsErr(e.message || 'Não foi possível abrir o ficheiro.')
+      toast.error(e.message || 'Não foi possível abrir o arquivo.')
     }
   }
 
@@ -162,16 +160,11 @@ export default function ResourcesPage() {
           Contratos assinados
         </h2>
         <p className="mt-2 text-sm text-slate-600">
-          Todos os contratos carregados pela equipa para a sua conta. Pode pré-visualizar ou usar o visualizador do
-          browser para imprimir / guardar PDF.
+          Todos os contratos carregados pela equipe para a sua conta. Você pode pré-visualizar ou usar o visualizador do
+          navegador para imprimir ou salvar em PDF.
         </p>
-        {contractsErr && (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-            {contractsErr}
-          </p>
-        )}
-        {contractsLoading && <p className="mt-4 text-sm text-slate-500">A carregar…</p>}
-        {!contractsLoading && !contractsErr && contracts.length === 0 && (
+        {contractsLoading && <p className="mt-4 text-sm text-slate-500">Carregando…</p>}
+        {!contractsLoading && contracts.length === 0 && (
           <p className="mt-4 text-sm text-slate-500">Ainda não há contratos disponíveis. Quando o mentor enviar, eles
             aparecerão aqui.</p>
         )}

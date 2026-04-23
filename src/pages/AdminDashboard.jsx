@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useToast } from '../context/ToastContext.jsx'
 import { api } from '../lib/api.js'
 import { Navigate } from 'react-router-dom'
 import {
@@ -99,8 +100,8 @@ function KpiCard({ icon: Icon, label, value, hint, tone = 'slate' }) {
 
 export default function AdminDashboard() {
   const { profile, loading } = useAuth()
+  const toast = useToast()
   const [students, setStudents] = useState([])
-  const [err, setErr] = useState('')
   const [busy, setBusy] = useState(true)
   const [createStudentOpen, setCreateStudentOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -110,16 +111,15 @@ export default function AdminDashboard() {
   const loadStudents = useCallback(async () => {
     if (profile?.role !== 'admin') return
     setBusy(true)
-    setErr('')
     try {
       const d = await api('/admin/students')
       setStudents(d.students || [])
     } catch (e) {
-      setErr(e.message)
+      toast.error(e.message || 'Não foi possível carregar a lista de alunos.')
     } finally {
       setBusy(false)
     }
-  }, [profile?.role])
+  }, [profile?.role, toast])
 
   useEffect(() => {
     loadStudents()
@@ -266,14 +266,13 @@ export default function AdminDashboard() {
 
         <p className="clear-both mt-1 text-slate-600">
           Visão geral de progresso. A coluna <strong>Mentoria</strong> mostra a última inscrição do aluno; se tiver
-          vários ciclos, o número entre parêntesis indica quantas inscrições existem (detalhe na ficha). A coluna{' '}
+          vários ciclos, o número entre parênteses indica quantas inscrições existem (detalhe na ficha). A coluna{' '}
           <strong>Prioridade</strong> resume atrasos, pendências de formulários e situações que pedem atenção (passe o
           rato para ver o detalhe).
         </p>
       </div>
 
       <AdminCreateStudentModal open={createStudentOpen} onClose={() => setCreateStudentOpen(false)} />
-      {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
 
       {!busy && students.length > 0 && (
         <section className="mt-6" aria-label="Indicadores">
@@ -406,7 +405,7 @@ export default function AdminDashboard() {
                   <tr>
                     <td colSpan={6} className="p-8 text-center text-slate-500">
                       {students.length === 0
-                        ? 'Nenhum aluno registado.'
+                        ? 'Nenhum aluno cadastrado.'
                         : 'Nenhum aluno corresponde ao filtro. Limpe a pesquisa ou tente outro termo.'}
                     </td>
                   </tr>

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
+import { ToastProvider } from './context/ToastContext.jsx'
 import { ProtectedRoute } from './components/ProtectedRoute.jsx'
 import Home from './pages/Home.jsx'
 import DiagnosticoPage from './pages/DiagnosticoPage.jsx'
@@ -37,6 +38,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <ToastProvider>
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<LoginLegacyRedirect />} />
@@ -54,6 +56,7 @@ export default function App() {
             <Route path="/admin/alunos/:id/plano-90-dias" element={<Plano90DiasPage />} />
           </Route>
         </Routes>
+        </ToastProvider>
       </AuthProvider>
     </BrowserRouter>
   )

@@ -11,6 +11,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useToast } from '../context/ToastContext.jsx';
 import { api } from '../lib/api.js';
 import { useFormAutosave } from '../hooks/useFormAutosave.js';
 
@@ -259,6 +260,7 @@ export default function Plano90DiasPage() {
   const { id: alunoId } = useParams();
   const loc = useLocation();
   const { user, profile, loading: authLoading } = useAuth();
+  const toast = useToast();
   const isAdminForm = profile?.role === 'admin' && alunoId != null && alunoId !== '';
   const arquivoEnrollmentId = useMemo(() => {
     const raw = new URLSearchParams(loc.search).get('arquivo')
@@ -271,7 +273,7 @@ export default function Plano90DiasPage() {
   const studentPortalBlocked =
     profile?.role === 'student' && profile?.portal_plano_90_enabled !== true
   const [adminStudentLabel, setAdminStudentLabel] = useState('');
-  const [archiveErr, setArchiveErr] = useState('');
+  const [archiveLoadFailed, setArchiveLoadFailed] = useState(false);
 
   const [capa, setCapa] = useState({ ...defaultCapa });
   const [mainGoal, setMainGoal] = useState({ ...defaultMainGoal });
@@ -330,7 +332,7 @@ export default function Plano90DiasPage() {
     }
     if (!targetFormUserId) return;
     setHydrated(false);
-    setArchiveErr('');
+    setArchiveLoadFailed(false);
     const draftKey = isAdminForm
       ? `altzen_draft_${FORM_TYPE}_admin_${targetFormUserId}`
       : `altzen_draft_${FORM_TYPE}_${targetFormUserId}`;
@@ -399,7 +401,10 @@ export default function Plano90DiasPage() {
           if (merged) applyPlano(merged);
         }
       } catch (e) {
-        if (!cancelled) setArchiveErr(e?.message || 'Não foi possível carregar o arquivo deste ciclo.');
+        if (!cancelled) {
+          toast.error(e?.message || 'Não foi possível carregar o arquivo deste ciclo.');
+          setArchiveLoadFailed(true);
+        }
       } finally {
         if (!cancelled) setHydrated(true);
       }
@@ -423,6 +428,7 @@ export default function Plano90DiasPage() {
     alunoId,
     profile?.role,
     profile?.portal_plano_90_enabled,
+    toast,
   ]);
 
   const setMonthEntrega = (mIndex, eIndex, value) => {
@@ -520,20 +526,12 @@ export default function Plano90DiasPage() {
         </div>
 
         <div className="min-w-0 space-y-10 p-8 print:space-y-6 print:p-0 print:pt-4">
-          {archiveMode && archiveErr && (
-            <div
-              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-              role="alert"
-            >
-              {archiveErr}
-            </div>
-          )}
-          {archiveMode && !archiveErr && hydrated && (
+          {archiveMode && !archiveLoadFailed && hydrated && (
             <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-950 print:hidden">
               <p>
                 {isAdminForm ? (
                   <>
-                    Registo guardado quando o ciclo passou a <strong>concluída</strong> ou <strong>encerrada</strong>.{' '}
+                    Registro salvo quando o ciclo passou a <strong>concluída</strong> ou <strong>encerrada</strong>.{' '}
                     <Link className="font-medium text-teal-800 underline" to={`/admin/alunos/${alunoId}/plano-90-dias`}>
                       Abrir o plano atual (edição)
                     </Link>

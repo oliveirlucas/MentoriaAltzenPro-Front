@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useToast } from '../context/ToastContext.jsx'
 import { api } from '../lib/api.js'
 import {
   CalendarDays,
@@ -95,12 +96,11 @@ function sessionChipClass(s) {
 
 export default function AdminCalendarPage() {
   const { profile, loading: authLoading } = useAuth()
+  const toast = useToast()
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
-  const [flash, setFlash] = useState(null)
   const [status, setStatus] = useState(null)
   const [events, setEvents] = useState([])
-  const [loadErr, setLoadErr] = useState('')
   const [busy, setBusy] = useState(true)
   const [eventsBusy, setEventsBusy] = useState(false)
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()))
@@ -130,27 +130,34 @@ export default function AdminCalendarPage() {
     const ok = searchParams.get('calendar')
     const err = searchParams.get('calendar_error')
     if (ok === 'connected') {
-      setFlash({ type: 'ok', text: 'Conta Google ligada. Já pode ver e criar eventos no calendário principal.' })
+      toast.success(
+        'Conta Google conectada. Você já pode ver e criar eventos no calendário principal.'
+      )
     } else if (err) {
-      setFlash({ type: 'err', text: err })
+      let msg = err
+      try {
+        msg = decodeURIComponent(String(err).replace(/\+/g, ' '))
+      } catch {
+        /* mantém texto bruto */
+      }
+      toast.error(msg)
     }
     if (ok || err) {
       nav('/admin/calendario', { replace: true })
     }
-  }, [searchParams, nav])
+  }, [searchParams, nav, toast])
 
   const loadStatus = useCallback(async () => {
     if (profile?.role !== 'admin') return
-    setLoadErr('')
     try {
       const d = await api('/admin/google-calendar/status')
       setStatus(d)
     } catch (e) {
-      setLoadErr(e.message || 'Não foi possível carregar o estado.')
+      toast.error(e.message || 'Não foi possível carregar o estado.')
     } finally {
       setBusy(false)
     }
-  }, [profile?.role])
+  }, [profile?.role, toast])
 
   useEffect(() => {
     loadStatus()
@@ -185,18 +192,17 @@ export default function AdminCalendarPage() {
   const loadEvents = useCallback(async () => {
     if (profile?.role !== 'admin' || !status?.connected) return
     setEventsBusy(true)
-    setLoadErr('')
     try {
       const q = new URLSearchParams({ from: range.fromIso, to: range.toIso }).toString()
       const d = await api(`/admin/google-calendar/events?${q}`)
       setEvents(d.events || [])
     } catch (e) {
       setEvents([])
-      setLoadErr(e.message || 'Não foi possível carregar eventos.')
+      toast.error(e.message || 'Não foi possível carregar eventos.')
     } finally {
       setEventsBusy(false)
     }
-  }, [profile?.role, status?.connected, range.fromIso, range.toIso])
+  }, [profile?.role, status?.connected, range.fromIso, range.toIso, toast])
 
   useEffect(() => {
     loadEvents()
@@ -227,28 +233,27 @@ export default function AdminCalendarPage() {
 
   const connectGoogle = async () => {
     setConnectBusy(true)
-    setLoadErr('')
     try {
       const d = await api('/admin/google-calendar/oauth-url')
       if (d?.url) window.location.href = d.url
-      else setLoadErr('Resposta inválida do servidor.')
+      else toast.error('Resposta inválida do servidor.')
     } catch (e) {
-      setLoadErr(e.message || 'Não foi possível iniciar a ligação.')
+      toast.error(e.message || 'Não foi possível iniciar a conexão.')
     } finally {
       setConnectBusy(false)
     }
   }
 
   const disconnectGoogle = async () => {
-    if (!window.confirm('Desligar o Google Calendar desta conta admin?')) return
+    if (!window.confirm('Desconectar o Google Calendar desta conta de administrador?')) return
     setDisconnectBusy(true)
-    setLoadErr('')
     try {
       await api('/admin/google-calendar/disconnect', { method: 'POST', body: '{}' })
       setEvents([])
       await loadStatus()
+      toast.success('Google Calendar desconectado.')
     } catch (e) {
-      setLoadErr(e.message || 'Erro ao desligar.')
+      toast.error(e.message || 'Erro ao desconectar.')
     } finally {
       setDisconnectBusy(false)
     }
@@ -283,22 +288,20 @@ export default function AdminCalendarPage() {
     setFormStudentId(ev.student?.id != null ? String(ev.student.id) : '')
     setFormSessionStatus(ev.sessionStatus || 'scheduled')
     setShowForm(true)
-    setLoadErr('')
   }
 
   const submitEvent = async (e) => {
     e.preventDefault()
     if (!formSummary.trim()) {
-      setLoadErr('Indique um título para o evento.')
+      toast.error('Indique um título para o evento.')
       return
     }
     if (!formStartDate || !formStartTime || !formEndDate || !formEndTime) {
-      setLoadErr('Preencha data e hora de início e de fim.')
+      toast.error('Preencha data e hora de início e de fim.')
       return
     }
     const wantedMeet = formCreateMeet
     setFormSaving(true)
-    setLoadErr('')
     const basePayload = {
       summary: formSummary.trim(),
       description: formDescription.trim() || undefined,
@@ -317,7 +320,7 @@ export default function AdminCalendarPage() {
           method: 'PATCH',
           body: JSON.stringify(basePayload),
         })
-        setFlash({ type: 'ok', text: 'Agendamento atualizado.' })
+        toast.success('Agendamento atualizado.')
       } else {
         const createPayload = { ...basePayload }
         if (!createPayload.studentId) delete createPayload.studentId
@@ -327,24 +330,20 @@ export default function AdminCalendarPage() {
           body: JSON.stringify(createPayload),
         })
         if (d?.event?.meetLink) {
-          setFlash({
-            type: 'ok',
-            text: `Evento criado. Link da reunião Meet: ${d.event.meetLink}`,
-          })
+          toast.success(`Evento criado. Link da reunião Meet: ${d.event.meetLink}`)
         } else if (wantedMeet) {
-          setFlash({
-            type: 'ok',
-            text: 'Evento criado. Se não vir link Meet, abra o evento no Google Calendar — a sala pode demorar uns segundos.',
-          })
+          toast.success(
+            'Evento criado. Se não vir link Meet, abra o evento no Google Calendar — a sala pode demorar uns segundos.'
+          )
         } else {
-          setFlash({ type: 'ok', text: 'Evento criado no Google Calendar.' })
+          toast.success('Evento criado no Google Calendar.')
         }
       }
       resetForm()
       setShowForm(false)
       await loadEvents()
     } catch (err) {
-      setLoadErr(err.message || 'Erro ao guardar evento.')
+      toast.error(err.message || 'Erro ao salvar evento.')
     } finally {
       setFormSaving(false)
     }
@@ -353,16 +352,15 @@ export default function AdminCalendarPage() {
   const markSessionCompleted = async (ev) => {
     if (!ev?.id) return
     setEventActionBusy(ev.id)
-    setLoadErr('')
     try {
       await api(`/admin/google-calendar/events/${encodeURIComponent(ev.id)}`, {
         method: 'PATCH',
         body: JSON.stringify({ sessionStatus: 'completed' }),
       })
-      setFlash({ type: 'ok', text: 'Marcado como aula realizada.' })
+      toast.success('Marcado como aula realizada.')
       await loadEvents()
     } catch (err) {
-      setLoadErr(err.message || 'Erro ao atualizar estado.')
+      toast.error(err.message || 'Erro ao atualizar estado.')
     } finally {
       setEventActionBusy(null)
     }
@@ -371,17 +369,15 @@ export default function AdminCalendarPage() {
   const openDeleteModal = (ev) => {
     if (!ev?.id) return
     setDeleteTarget(ev)
-    setLoadErr('')
   }
 
   const confirmDeleteEvent = async () => {
     const ev = deleteTarget
     if (!ev?.id) return
     setDeleteBusy(true)
-    setLoadErr('')
     try {
       await api(`/admin/google-calendar/events/${encodeURIComponent(ev.id)}`, { method: 'DELETE' })
-      setFlash({ type: 'ok', text: 'Agendamento eliminado.' })
+      toast.success('Agendamento eliminado.')
       setDeleteTarget(null)
       if (editingEventId === ev.id) {
         resetForm()
@@ -389,7 +385,7 @@ export default function AdminCalendarPage() {
       }
       await loadEvents()
     } catch (err) {
-      setLoadErr(err.message || 'Erro ao eliminar.')
+      toast.error(err.message || 'Erro ao excluir.')
     } finally {
       setDeleteBusy(false)
     }
@@ -427,22 +423,9 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      {flash && (
-        <div
-          className={`rounded-lg border px-3 py-2 text-sm ${
-            flash.type === 'ok'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-              : 'border-red-200 bg-red-50 text-red-900'
-          }`}
-          role="status"
-        >
-          {flash.text}
-        </div>
-      )}
-
       {busy && (
         <p className="flex items-center gap-2 text-slate-500">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> A carregar…
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Carregando…
         </p>
       )}
 
@@ -451,13 +434,13 @@ export default function AdminCalendarPage() {
           {!status.configured ? (
             <p className="text-sm text-amber-800">
               O servidor ainda não tem as variáveis <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_*</code>{' '}
-              no <code className="rounded bg-amber-100 px-1">.env</code> da API. Peça à equipa técnica para configurar a
-              consola Google Cloud (OAuth tipo Web) e reiniciar a API.
+              no <code className="rounded bg-amber-100 px-1">.env</code> da API. Peça à equipe técnica para configurar o
+              Console do Google Cloud (OAuth tipo Web) e reiniciar a API.
             </p>
           ) : status.connected ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="font-medium text-slate-900">Ligado ao Google Calendar</p>
+                <p className="font-medium text-slate-900">Conectado ao Google Calendar</p>
                 <p className="text-sm text-slate-600">
                   Conta: <strong>{status.google_email || '—'}</strong>
                 </p>
@@ -468,16 +451,20 @@ export default function AdminCalendarPage() {
                 disabled={disconnectBusy}
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
               >
-                <LogOut className="h-4 w-4" aria-hidden />
-                {disconnectBusy ? 'A desligar…' : 'Desligar Google'}
+                {disconnectBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <LogOut className="h-4 w-4" aria-hidden />
+                )}
+                {disconnectBusy ? 'Desconectando…' : 'Desconectar Google'}
               </button>
             </div>
           ) : (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-slate-700">
-                Ligue a sua conta Google para listar e criar eventos. Será pedido consentimento para{' '}
-                <strong>eventos do calendário</strong> e <strong>e-mail</strong> (só para mostrar qual conta ficou
-                ligada).
+                Conecte sua conta Google para listar e criar eventos. Será solicitado consentimento para{' '}
+                <strong>eventos do calendário</strong> e <strong>e-mail</strong> (apenas para mostrar qual conta ficou
+                conectada).
               </p>
               <button
                 type="button"
@@ -485,18 +472,16 @@ export default function AdminCalendarPage() {
                 disabled={connectBusy}
                 className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
               >
-                <Link2 className="h-4 w-4" aria-hidden />
-                {connectBusy ? 'A redirecionar…' : 'Ligar Google Calendar'}
+                {connectBusy ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                ) : (
+                  <Link2 className="h-4 w-4 shrink-0" aria-hidden />
+                )}
+                {connectBusy ? 'Redirecionando…' : 'Conectar Google Calendar'}
               </button>
             </div>
           )}
         </div>
-      )}
-
-      {loadErr && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
-          {loadErr}
-        </p>
       )}
 
       {status?.connected && (
@@ -560,7 +545,7 @@ export default function AdminCalendarPage() {
               </h3>
               <p className="mt-1 text-xs text-slate-600">
                 Datas em <strong>AAAA-MM-DD</strong>, horas em <strong>HH:mm</strong> (24h). Opcionalmente cria uma
-                sala <strong>Google Meet</strong> ligada ao evento. Associe um <strong>aluno</strong> para acompanhar
+                sala <strong>Google Meet</strong> vinculada ao evento. Associe um <strong>aluno</strong> para acompanhar
                 aulas realizadas no detalhe do aluno.
               </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -592,7 +577,7 @@ export default function AdminCalendarPage() {
                     <option value="">— Sem aluno associado —</option>
                     {studentOptions.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {(s.full_name || s.email || '').trim() || `Utilizador #${s.id}`} ({s.email})
+                        {(s.full_name || s.email || '').trim() || `Usuário #${s.id}`} ({s.email})
                       </option>
                     ))}
                   </select>
@@ -687,9 +672,18 @@ export default function AdminCalendarPage() {
                 <button
                   type="submit"
                   disabled={formSaving}
-                  className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
                 >
-                  {formSaving ? 'A guardar…' : editingEventId ? 'Atualizar agendamento' : 'Guardar no Google Calendar'}
+                  {formSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                      Salvando…
+                    </>
+                  ) : editingEventId ? (
+                    'Atualizar agendamento'
+                  ) : (
+                    'Salvar no Google Calendar'
+                  )}
                 </button>
                 <button
                   type="button"
@@ -709,7 +703,7 @@ export default function AdminCalendarPage() {
             <h3 className="text-base font-bold text-slate-900">Eventos do mês</h3>
             {eventsBusy ? (
               <p className="mt-4 flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> A carregar eventos…
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Carregando eventos…
               </p>
             ) : eventsByDay.length === 0 ? (
               <p className="mt-4 text-sm text-slate-500">Sem eventos neste período.</p>
@@ -775,7 +769,7 @@ export default function AdminCalendarPage() {
                               className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 sm:text-sm"
                             >
                               <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                              Eliminar
+                              Excluir
                             </button>
                             {ev.sessionDbId && ev.sessionStatus !== 'completed' ? (
                               <button
@@ -784,7 +778,11 @@ export default function AdminCalendarPage() {
                                 onClick={() => markSessionCompleted(ev)}
                                 className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50 sm:text-sm"
                               >
-                                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                                {eventActionBusy === ev.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                                ) : (
+                                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                                )}
                                 Marcar realizada
                               </button>
                             ) : null}
@@ -839,11 +837,11 @@ export default function AdminCalendarPage() {
             className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
           >
             <h2 id={deleteModalTitleId} className="text-lg font-bold text-slate-900">
-              Eliminar agendamento?
+              Excluir agendamento?
             </h2>
             <p className="mt-2 text-sm text-slate-600">
               O evento será removido do <strong>Google Calendar</strong> e, se estiver associado a um aluno, deixa de
-              contar no portal. Esta ação não pode ser anulada aqui.
+              contar no portal. Esta ação não pode ser desfeita por aqui.
             </p>
             <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
               <p className="font-medium text-slate-900">{deleteTarget.summary || '(sem título)'}</p>
@@ -874,12 +872,12 @@ export default function AdminCalendarPage() {
                 {deleteBusy ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    A eliminar…
+                    Excluindo…
                   </>
                 ) : (
                   <>
                     <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
-                    Eliminar
+                    Excluir
                   </>
                 )}
               </button>

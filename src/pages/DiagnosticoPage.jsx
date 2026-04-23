@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, Navigate, useParams, useLocation } from 'react-router-dom';
 import { User, Briefcase, Code, LineChart, Printer, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useToast } from '../context/ToastContext.jsx';
 import { api } from '../lib/api.js';
 import { useFormAutosave } from '../hooks/useFormAutosave.js';
 
@@ -46,6 +47,7 @@ export default function DiagnosticoPage() {
   const { id: alunoId } = useParams();
   const loc = useLocation();
   const { user, profile: userProfile, loading: authLoading } = useAuth();
+  const toast = useToast();
   const isAdminForm = userProfile?.role === 'admin' && alunoId != null && alunoId !== '';
   const arquivoEnrollmentId = useMemo(() => {
     const raw = new URLSearchParams(loc.search).get('arquivo')
@@ -58,7 +60,7 @@ export default function DiagnosticoPage() {
   const studentPortalBlocked =
     userProfile?.role === 'student' && userProfile?.portal_diagnostico_enabled !== true
   const [adminStudentLabel, setAdminStudentLabel] = useState('');
-  const [archiveErr, setArchiveErr] = useState('');
+  const [archiveLoadFailed, setArchiveLoadFailed] = useState(false);
 
   // Contexto Atual
   const [basicData, setBasicData] = useState({ ...defaultBasicData });
@@ -154,7 +156,7 @@ export default function DiagnosticoPage() {
     }
     if (!targetFormUserId) return;
     setHydrated(false);
-    setArchiveErr('');
+    setArchiveLoadFailed(false);
     const draftKey = isAdminForm
       ? `altzen_draft_${FORM_TYPE}_admin_${targetFormUserId}`
       : `altzen_draft_${FORM_TYPE}_${targetFormUserId}`;
@@ -223,7 +225,10 @@ export default function DiagnosticoPage() {
           if (merged) applyFormData(merged);
         }
       } catch (e) {
-        if (!cancelled) setArchiveErr(e?.message || 'Não foi possível carregar o arquivo deste ciclo.');
+        if (!cancelled) {
+          toast.error(e?.message || 'Não foi possível carregar o arquivo deste ciclo.');
+          setArchiveLoadFailed(true);
+        }
       } finally {
         if (!cancelled) setHydrated(true);
       }
@@ -247,6 +252,7 @@ export default function DiagnosticoPage() {
     alunoId,
     userProfile?.role,
     userProfile?.portal_diagnostico_enabled,
+    toast,
   ]);
 
   // Cálculo de totais
@@ -347,8 +353,8 @@ export default function DiagnosticoPage() {
   }
 
   return (
-    <div className="w-full min-w-0 print:bg-white font-sans text-gray-800">
-      <div className="mx-auto min-w-0 max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl print:rounded-none print:shadow-none">
+    <div className="w-full min-w-0 font-sans text-slate-800 print:bg-white">
+      <div className="mx-auto min-w-0 max-w-5xl overflow-hidden rounded-2xl bg-white shadow-xl print:rounded-none print:shadow-none">
         
         {/* Header */}
         <div className="bg-blue-900 p-8 text-white print:border-b-4 print:border-blue-900 print:bg-white print:text-blue-900">
@@ -393,21 +399,13 @@ export default function DiagnosticoPage() {
           </div>
         </div>
 
-        <div className="min-w-0 space-y-12 p-8 print:space-y-6 print:p-0 print:pt-4">
-          {archiveMode && archiveErr && (
-            <div
-              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-              role="alert"
-            >
-              {archiveErr}
-            </div>
-          )}
-          {archiveMode && !archiveErr && hydrated && (
+        <div className="min-w-0 space-y-10 p-8 print:space-y-6 print:p-0 print:pt-4">
+          {archiveMode && !archiveLoadFailed && hydrated && (
             <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-950 print:hidden">
               <p>
                 {isAdminForm ? (
                   <>
-                    Este é o registo guardado quando o ciclo passou a <strong>concluída</strong> ou{' '}
+                    Este é o registro salvo quando o ciclo passou a <strong>concluída</strong> ou{' '}
                     <strong>encerrada</strong>.{' '}
                     <Link className="font-medium text-teal-800 underline" to={`/admin/alunos/${alunoId}/diagnostico`}>
                       Abrir o formulário atual (edição)

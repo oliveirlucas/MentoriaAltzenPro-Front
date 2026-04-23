@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useToast } from '../context/ToastContext.jsx'
 import { FileText, Calendar, ArrowRight, TrendingUp, ScrollText, Video, ExternalLink } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { formatProgramType } from '../lib/programType.js'
@@ -52,10 +53,9 @@ function sessionStatusLabel(status) {
 
 export default function Dashboard() {
   const { profile, enrollments, enrollmentFormArchives, user } = useAuth()
+  const toast = useToast()
   const [lastActivity, setLastActivity] = useState(null)
-  const [loadErr, setLoadErr] = useState(null)
   const [calendarSessions, setCalendarSessions] = useState([])
-  const [sessionsErr, setSessionsErr] = useState(null)
 
   const archiveGroups = useMemo(
     () => archivesByEnrollment(enrollmentFormArchives),
@@ -97,7 +97,6 @@ export default function Dashboard() {
     let ok = true
     ;(async () => {
       try {
-        setLoadErr(null)
         const reqs = []
         if (portalDiag) reqs.push(api('/forms/altzen-diagnostico-carreira'))
         if (portalPlano) reqs.push(api('/forms/altzen-plano-90-dias'))
@@ -110,33 +109,32 @@ export default function Dashboard() {
         if (ok && times.length) setLastActivity(new Date(Math.max(...times)).toLocaleString('pt-BR'))
         if (ok && !times.length) setLastActivity(null)
       } catch (e) {
-        if (ok) setLoadErr(e.message)
+        if (ok) toast.error(e.message || 'Não foi possível carregar a última atividade nos formulários.')
       }
     })()
     return () => {
       ok = false
     }
-  }, [user?.id, portalDiag, portalPlano])
+  }, [user?.id, portalDiag, portalPlano, toast])
 
   useEffect(() => {
     if (!user?.id || profile?.role === 'admin') return
     let ok = true
     ;(async () => {
       try {
-        setSessionsErr(null)
         const d = await api('/me/calendar-sessions')
         if (ok) setCalendarSessions(d.sessions || [])
       } catch (e) {
         if (ok) {
           setCalendarSessions([])
-          setSessionsErr(e.message || 'Não foi possível carregar os agendamentos.')
+          toast.error(e.message || 'Não foi possível carregar os agendamentos.')
         }
       }
     })()
     return () => {
       ok = false
     }
-  }, [user?.id, profile?.role])
+  }, [user?.id, profile?.role, toast])
 
   if (profile?.role === 'admin') {
     return <Navigate to="/admin" replace />
@@ -152,11 +150,8 @@ export default function Dashboard() {
       <h1 className="text-2xl font-bold text-slate-900">Seu painel</h1>
       <p className="mt-1 text-slate-600">
         Acompanhe o <strong>ciclo atual</strong> (inscrição mais recente). Formulários em branco significam que ainda
-        não guardou respostas neste ciclo — o arquivo do ciclo anterior, quando existir, fica na secção de histórico.
+        não guardou respostas neste ciclo. O arquivo do ciclo anterior, quando existir, fica na secção de histórico.
       </p>
-
-      {loadErr && <p className="mt-2 text-sm text-amber-700">Nota: {loadErr}</p>}
-      {sessionsErr && <p className="mt-2 text-sm text-amber-700">Agendamentos: {sessionsErr}</p>}
 
       <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex items-center gap-2 text-slate-800">
@@ -168,9 +163,9 @@ export default function Dashboard() {
           para o e-mail da sua conta (aparece na sua agenda, por exemplo no Google Calendar).
         </p>
 
-        {!sessionsErr && calendarSessions.length === 0 && (
+        {calendarSessions.length === 0 && (
           <p className="mt-4 text-sm text-slate-500">
-            Ainda não há sessões registadas. Quando o mentor o associar a um evento no calendário, elas aparecem aqui.
+            Ainda não há sessões registradas. Quando o mentor associar o aluno a um evento no calendário, elas aparecem aqui.
           </p>
         )}
 
@@ -208,7 +203,7 @@ export default function Dashboard() {
                         href={s.google_html_link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-1 ml-0 inline-flex items-center gap-1.5 text-xs text-slate-600 hover:underline"
+                        className="mt-1 ml-3 inline-flex items-center gap-1.5 text-xs text-slate-600 hover:underline"
                       >
                         <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                         Abrir no Google Calendar
@@ -244,7 +239,7 @@ export default function Dashboard() {
                         className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-600 hover:underline"
                       >
                         <Video className="h-3.5 w-3.5 shrink-0" />
-                        Link Meet (registo)
+                        Link Meet (salvo)
                       </a>
                     )}
                   </li>
@@ -290,8 +285,8 @@ export default function Dashboard() {
           )}
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm font-medium text-slate-500">Última gravação (ciclo atual)</p>
-          <p className="mt-2 text-lg text-slate-900">{lastActivity || 'Ainda sem dados guardados neste ciclo'}</p>
+          <p className="text-sm font-medium text-slate-500">Último salvamento (ciclo atual)</p>
+          <p className="mt-2 text-lg text-slate-900">{lastActivity || 'Ainda sem dados salvos neste ciclo'}</p>
         </div>
       </div>
 

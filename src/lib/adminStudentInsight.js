@@ -8,7 +8,7 @@ export const FORM_TYPES = {
 
 /**
  * O portal mantém um único par de snapshots (diagnóstico / plano) por aluno.
- * Com uma nova inscrição (novo ciclo), se a última gravação do formulário for
+ * Com uma nova inscrição (novo ciclo), se o último salvamento do formulário for
  * anterior à criação da inscrição mais recente, o conteúdo ainda corresponde ao
  * ciclo anterior — não deve alimentar resumo nem alertas do ciclo atual.
  *
@@ -171,19 +171,19 @@ export function computeMentorHealth({ enrollment, form_snapshots, now = new Date
     messages.push({ level: 'low', text: 'Defina a data de início da mentoria para acompanhar semanas e atraso.' })
   }
   if (usePlano && state === 'ativa' && day && day > 1 && !planU) {
-    messages.push({ level: 'high', text: 'Plano 90 dias ainda sem registo com o programa em curso (início +2 dias ou mais).' })
+    messages.push({ level: 'high', text: 'Plano 90 dias ainda sem registro com o programa em curso (início +2 dias ou mais).' })
   } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 14 && day && day > 1) {
     messages.push({
       level: 'high',
-      text: `Plano sem ser gravado há cerca de ${daysSincePlano} dia(s) — risco de atraso de execução (aulas/ritmo).`,
+      text: `Plano sem atualização há cerca de ${daysSincePlano} dia(s) — risco de atraso de execução (aulas/ritmo).`,
     })
   } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 7) {
     messages.push({
       level: 'medium',
-      text: `Cerca de ${daysSincePlano} dia(s) sem nova gravação do plano no portal.`,
+      text: `Cerca de ${daysSincePlano} dia(s) sem novo salvamento do plano no portal.`,
     })
   } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 3) {
-    messages.push({ level: 'low', text: 'Alguns dias sem registo do plano — acompanhe na mentoria de rotina.' })
+    messages.push({ level: 'low', text: 'Alguns dias sem registro do plano — acompanhe na mentoria de rotina.' })
   }
   if (useDiag && activeLike && !diaU) {
     if (day && day >= 14) {
@@ -193,7 +193,7 @@ export function computeMentorHealth({ enrollment, form_snapshots, now = new Date
     }
   }
   if (day && day >= 80 && state === 'ativa') {
-    messages.push({ level: 'info', text: 'Aproximando o fim da janela de 90 dias — preparar fecho ou redefinir o plano.' })
+    messages.push({ level: 'info', text: 'Aproximando o fim da janela de 90 dias — preparar o fechamento ou redefinir o plano.' })
   }
 
   let status = 'ok' // ok | atencao | atraso | critico
@@ -302,13 +302,13 @@ export function computeAdminListAttention(row, now = new Date()) {
       const days = Math.floor((now.getTime() - t) / 864e5)
       if (days > 21 && (band === 'ok' || band === 'info')) {
         band = 'watch'
-        detail = `Sem gravação em qualquer formulário há ${days} dia(s) — vale uma conversa na mentoria.`
+        detail = `Sem salvamento em qualquer formulário há ${days} dia(s) — vale uma conversa na mentoria.`
       }
     }
   } else if (st === 'ativa' && !row.last_form_activity && h.day && h.day > 7) {
     if (band === 'ok' || band === 'info') {
       band = 'watch'
-      detail = 'Nenhum formulário gravado no portal após vários dias de ciclo em curso.'
+      detail = 'Nenhum formulário salvo no portal após vários dias de ciclo em curso.'
     }
   }
 

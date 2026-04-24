@@ -6,11 +6,7 @@ import { api } from '../lib/api.js'
 import { Navigate } from 'react-router-dom'
 import {
   Users,
-  Eye,
   UserPlus,
-  Search,
-  ChevronLeft,
-  ChevronRight,
   UserCheck,
   CalendarClock,
   CalendarDays,
@@ -21,55 +17,7 @@ import {
 } from 'lucide-react'
 import { ADMIN_STUDENTS_REFRESH } from '../lib/adminEvents.js'
 import AdminCreateStudentModal from '../components/AdminCreateStudentModal.jsx'
-import { formatProgramType } from '../lib/programType.js'
-import { computeAdminListAttention } from '../lib/adminStudentInsight.js'
-
-const PAGE_SIZE_OPTIONS = [10, 25, 50]
-
-function enrollmentStateLabel(state) {
-  switch (state) {
-    case 'ativa':
-      return 'Ativa'
-    case 'agendada':
-      return 'Agendada'
-    case 'concluida':
-      return 'Concluída'
-    case 'encerrada':
-      return 'Encerrada'
-    default:
-      return state ? String(state) : '—'
-  }
-}
-
-function attentionChipClass(band) {
-  switch (band) {
-    case 'critical':
-      return 'border-rose-300 bg-rose-50 text-rose-950'
-    case 'late':
-      return 'border-orange-300 bg-orange-50 text-orange-950'
-    case 'watch':
-      return 'border-amber-300 bg-amber-50 text-amber-950'
-    case 'info':
-      return 'border-sky-300 bg-sky-50 text-sky-950'
-    default:
-      return 'border-emerald-200 bg-emerald-50 text-emerald-900'
-  }
-}
-
-function enrollmentStateChipClass(state) {
-  switch (state) {
-    case 'ativa':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-900'
-    case 'agendada':
-      return 'border-amber-200 bg-amber-50 text-amber-900'
-    case 'concluida':
-      return 'border-indigo-200 bg-indigo-50 text-indigo-950'
-    case 'encerrada':
-      return 'border-slate-300 bg-slate-100 text-slate-800'
-    default:
-      return 'border-slate-200 bg-slate-50 text-slate-600'
-  }
-}
+import AdminStudentsDataTable from '../components/AdminStudentsDataTable.jsx'
 
 function KpiCard({ icon: Icon, label, value, hint, tone = 'slate' }) {
   const tones = {
@@ -104,9 +52,6 @@ export default function AdminDashboard() {
   const [students, setStudents] = useState([])
   const [busy, setBusy] = useState(true)
   const [createStudentOpen, setCreateStudentOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
 
   const loadStudents = useCallback(async () => {
     if (profile?.role !== 'admin') return
@@ -132,14 +77,6 @@ export default function AdminDashboard() {
     window.addEventListener(ADMIN_STUDENTS_REFRESH, handler)
     return () => window.removeEventListener(ADMIN_STUDENTS_REFRESH, handler)
   }, [loadStudents])
-
-  useEffect(() => {
-    setPage(1)
-  }, [searchQuery])
-
-  useEffect(() => {
-    setPage(1)
-  }, [pageSize])
 
   const kpis = useMemo(() => {
     let ativos = 0
@@ -183,34 +120,6 @@ export default function AdminDashboard() {
       atividade7d,
     }
   }, [students])
-
-  const filteredStudents = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    if (!q) return students
-    return students.filter((s) => {
-      const name = (s.full_name || '').toLowerCase()
-      const email = (s.email || '').toLowerCase()
-      return name.includes(q) || email.includes(q)
-    })
-  }, [students, searchQuery])
-
-  const totalFiltered = filteredStudents.length
-  const totalPages = useMemo(
-    () => (totalFiltered === 0 ? 0 : Math.ceil(totalFiltered / pageSize)),
-    [totalFiltered, pageSize]
-  )
-
-  useEffect(() => {
-    if (totalPages > 0 && page > totalPages) setPage(totalPages)
-  }, [totalPages, page])
-
-  const safePage = totalPages === 0 ? 1 : Math.min(Math.max(1, page), totalPages)
-
-  const pageRows = useMemo(() => {
-    if (totalPages === 0) return []
-    const start = (safePage - 1) * pageSize
-    return filteredStudents.slice(start, start + pageSize)
-  }, [filteredStudents, safePage, pageSize, totalPages])
 
   if (loading) return <div className="text-slate-500">Carregando…</div>
   if (profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
@@ -338,168 +247,7 @@ export default function AdminDashboard() {
         </section>
       )}
 
-      {busy ? (
-        <p className="mt-4 text-slate-500">Carregando lista…</p>
-      ) : (
-        <>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="min-w-0 flex-1">
-              <label htmlFor="admin-student-search" className="text-xs font-medium uppercase text-slate-500">
-                Filtrar por nome ou e-mail
-              </label>
-              <div className="relative mt-1 max-w-md">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                  aria-hidden
-                />
-                <input
-                  id="admin-student-search"
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Ex.: Maria ou @gmail"
-                  className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none ring-indigo-500/30 focus:border-indigo-500 focus:ring-2"
-                  autoComplete="off"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <label htmlFor="admin-page-size" className="text-xs text-slate-500">
-                Por página
-              </label>
-              <select
-                id="admin-page-size"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
-              >
-                {PAGE_SIZE_OPTIONS.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <p className="mt-2 text-sm text-slate-600">
-            {searchQuery.trim()
-              ? `${totalFiltered} resultado(s) com o filtro atual.`
-              : `${students.length} aluno(s) no total.`}
-          </p>
-
-          <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="w-full min-w-[860px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="p-3 font-semibold">Nome / E-mail</th>
-                  <th className="p-3 font-semibold">Mentoria</th>
-                  <th className="p-3 font-semibold">Estado</th>
-                  <th className="p-3 font-semibold">Prioridade</th>
-                  <th className="p-3 font-semibold">Último envio</th>
-                  <th className="p-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-500">
-                      {students.length === 0
-                        ? 'Nenhum aluno cadastrado.'
-                        : 'Nenhum aluno corresponde ao filtro. Limpe a pesquisa ou tente outro termo.'}
-                    </td>
-                  </tr>
-                ) : (
-                  pageRows.map((s) => {
-                    const att = computeAdminListAttention(s)
-                    return (
-                    <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50/80">
-                      <td className="p-3">
-                        <div className="font-medium text-slate-900">{s.full_name || '—'}</div>
-                        <div className="text-xs text-slate-500">{s.email}</div>
-                      </td>
-                      <td className="p-3">
-                        <span className="font-medium text-slate-800">{formatProgramType(s.program_type)}</span>
-                        {s.enrollment_count > 1 && (
-                          <span className="ml-1 text-xs font-normal text-slate-500">
-                            ({s.enrollment_count} inscrições)
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        {!s.enrollment_id ? (
-                          <span className="inline-flex rounded-full border border-dashed border-slate-300 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-500">
-                            Sem inscrição
-                          </span>
-                        ) : (
-                          <span
-                            className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${enrollmentStateChipClass(s.enrollment_state)}`}
-                          >
-                            {enrollmentStateLabel(s.enrollment_state)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="max-w-[220px] p-3">
-                        <span
-                          className={`inline-flex max-w-full cursor-default rounded-full border px-2.5 py-0.5 text-xs font-semibold ${attentionChipClass(att.band)}`}
-                          title={att.detail}
-                        >
-                          <span className="truncate">{att.label}</span>
-                        </span>
-                      </td>
-                      <td className="p-3 text-slate-600">
-                        {s.last_form_activity
-                          ? new Date(s.last_form_activity).toLocaleString('pt-BR')
-                          : '—'}
-                      </td>
-                      <td className="p-3">
-                        <Link
-                          to={`/admin/alunos/${s.id}`}
-                          className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-200"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          Detalhe
-                        </Link>
-                      </td>
-                    </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {totalPages > 1 && (
-            <div className="mt-4 flex flex-col items-stretch justify-between gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center">
-              <p className="text-sm text-slate-600">
-                Página <span className="font-semibold text-slate-900">{safePage}</span> de{' '}
-                <span className="font-semibold text-slate-900">{totalPages}</span>
-                <span className="text-slate-500"> · {totalFiltered} linha(s)</span>
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={safePage <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronLeft className="h-4 w-4" aria-hidden />
-                  Anterior
-                </button>
-                <button
-                  type="button"
-                  disabled={safePage >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Seguinte
-                  <ChevronRight className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
+      {busy ? <p className="mt-4 text-slate-500">Carregando lista…</p> : <AdminStudentsDataTable students={students} />}
     </div>
   )
 }

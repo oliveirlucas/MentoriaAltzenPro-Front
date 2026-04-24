@@ -417,7 +417,7 @@ export default function AdminCalendarPage() {
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
             Integração com o <strong>Google Calendar</strong> da mesma conta Google que usa para o Gmail. Os eventos
-            aparecem no calendário <strong>principal</strong> da conta que autorizar — ideal para aulas e
+            aparecem no calendário <strong>principal</strong> da conta que autorizar, ideal para aulas e
             agendamentos.
           </p>
         </div>

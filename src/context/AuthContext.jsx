@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { api, getToken, setToken } from '../lib/api.js'
+import { api, setCsrfToken } from '../lib/api.js'
 
 const AuthContext = createContext(null)
 
@@ -11,15 +11,6 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   const refreshMe = useCallback(async () => {
-    const t = getToken()
-    if (!t) {
-      setUser(null)
-      setProfile(null)
-      setEnrollments([])
-      setEnrollmentFormArchives([])
-      setLoading(false)
-      return
-    }
     try {
       const d = await api('/me')
       setUser(d.user)
@@ -45,17 +36,22 @@ export function AuthProvider({ children }) {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     })
-    setToken(d.token)
     await refreshMe()
     return d
   }
 
-  const logout = () => {
-    setToken(null)
-    setUser(null)
-    setProfile(null)
-    setEnrollments([])
-    setEnrollmentFormArchives([])
+  const logout = async () => {
+    try {
+      await api('/auth/logout', { method: 'POST' })
+    } catch {
+      /* */
+    } finally {
+      setCsrfToken(null)
+      setUser(null)
+      setProfile(null)
+      setEnrollments([])
+      setEnrollmentFormArchives([])
+    }
   }
 
   const value = {

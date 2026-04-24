@@ -144,6 +144,7 @@ export default function ProfilePage() {
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
+      await refreshMe()
       toast.success('Senha alterada com sucesso.')
     } catch (e2) {
       toast.error(e2.message || 'Não foi possível alterar a senha.')

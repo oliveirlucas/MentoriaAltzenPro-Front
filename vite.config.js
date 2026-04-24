@@ -14,18 +14,20 @@ function cspMetaPlugin(mode, env) {
     }
   }
   const connectSrc = [...connectParts].join(' ')
+  // script-src: módulos Vite em 'self'; Web Analytics do Cloudflare carrega beacon deste host
+  const scriptSrcDev = "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+  const scriptSrcProd = "script-src 'self' https://static.cloudflareinsights.com"
   const directives = [
     "default-src 'self'",
-    mode === 'development'
-      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-      : "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
+    mode === 'development' ? scriptSrcDev : scriptSrcProd,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: https: blob:",
-    "font-src 'self' data:",
+    // data: + https: — fontes em CDNs (ex.: gstatic) sem listar todos os hosts
+    "font-src 'self' data: https: blob:",
     `connect-src ${connectSrc}`,
     "frame-src 'self' blob:",
     "worker-src 'self' blob:",
-    "frame-ancestors 'none'",
+    // frame-ancestors: não usar em <meta> (é ignorado) — defina no header do Cloudflare/NGINX
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",

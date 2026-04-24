@@ -2,11 +2,13 @@ import React from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { LayoutDashboard, FileText, Calendar, CalendarDays, User, BookOpen, LogOut, Shield } from 'lucide-react'
+import StudentNotesBell from './StudentNotesBell.jsx'
 
 export default function AppShell({ children }) {
   const { user, profile, logout } = useAuth()
   const nav = useNavigate()
   const isAdmin = profile?.role === 'admin'
+  const isStudent = profile?.role === 'student'
   const portalDiag = profile?.portal_diagnostico_enabled === true
   const portalPlano = profile?.portal_plano_90_enabled === true
 
@@ -120,6 +122,7 @@ export default function AppShell({ children }) {
                 </NavLink>
               </>
             )}
+            {isStudent && <StudentNotesBell />}
             <span className="pl-2 text-xs text-slate-400">
               {user?.email}
             </span>

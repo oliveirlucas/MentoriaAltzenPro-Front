@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
 import { Link, Navigate } from 'react-router-dom'
+import { NOTES_READ_CHANGED } from '../components/StudentNotesBell.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 import { FileText, Calendar, ArrowRight, TrendingUp, ScrollText, Video, ExternalLink } from 'lucide-react'
@@ -56,6 +57,7 @@ export default function Dashboard() {
   const toast = useToast()
   const [lastActivity, setLastActivity] = useState(null)
   const [calendarSessions, setCalendarSessions] = useState([])
+  const [mentorNotesUnread, setMentorNotesUnread] = useState(0)
 
   const archiveGroups = useMemo(
     () => archivesByEnrollment(enrollmentFormArchives),
@@ -136,6 +138,39 @@ export default function Dashboard() {
     }
   }, [user?.id, profile?.role, toast])
 
+  useEffect(() => {
+    if (profile?.role !== 'student' || !user?.id) return
+    let ok = true
+    ;(async () => {
+      try {
+        const d = await api('/notes/summary')
+        if (ok) setMentorNotesUnread(d.unread_count ?? 0)
+      } catch {
+        if (ok) setMentorNotesUnread(0)
+      }
+    })()
+    return () => {
+      ok = false
+    }
+  }, [user?.id, profile?.role])
+
+  useEffect(() => {
+    if (profile?.role !== 'student') return
+    const onUpd = () => {
+      let ok = true
+      ;(async () => {
+        try {
+          const d = await api('/notes/summary')
+          if (ok) setMentorNotesUnread(d.unread_count ?? 0)
+        } catch {
+          if (ok) setMentorNotesUnread(0)
+        }
+      })()
+    }
+    window.addEventListener(NOTES_READ_CHANGED, onUpd)
+    return () => window.removeEventListener(NOTES_READ_CHANGED, onUpd)
+  }, [profile?.role])
+
   if (profile?.role === 'admin') {
     return <Navigate to="/admin" replace />
   }
@@ -152,6 +187,24 @@ export default function Dashboard() {
         Acompanhe o <strong>ciclo atual</strong> (inscrição mais recente). Formulários em branco significam que ainda
         não guardou respostas neste ciclo. O arquivo do ciclo anterior, quando existir, fica na secção de histórico.
       </p>
+
+      {mentorNotesUnread > 0 && (
+        <div
+          className="mt-6 flex flex-col gap-2 rounded-xl border border-indigo-200 bg-indigo-50/90 px-4 py-3 text-sm text-indigo-950 sm:flex-row sm:items-center sm:justify-between"
+          role="status"
+        >
+          <p>
+            Você tem <strong>{mentorNotesUnread === 1 ? 'uma nota nova' : `${mentorNotesUnread} notas novas`}</strong> do
+            mentor em <strong>Recursos</strong>.
+          </p>
+          <Link
+            to="/recursos"
+            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-800"
+          >
+            Ver notas
+          </Link>
+        </div>
+      )}
 
       <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex items-center gap-2 text-slate-800">

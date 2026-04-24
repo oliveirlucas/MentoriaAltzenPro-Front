@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useId, useState } from 'react'
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 import { api, apiBlob } from '../lib/api.js'
+import { dispatchNotesReadChanged } from '../components/StudentNotesBell.jsx'
 import { ScrollText, Eye, X, Link2, Paperclip } from 'lucide-react'
 
 function formatPt(iso) {
@@ -24,6 +25,13 @@ export default function ResourcesPage() {
   const [previewKind, setPreviewKind] = useState('pdf')
   const [previewLabel, setPreviewLabel] = useState('')
   const previewTitleId = useId()
+  const noteMarkDone = useRef(new Set())
+
+  const noteIsUnread = useCallback((n) => {
+    if (n.is_unread === true) return true
+    if (n.is_unread === false) return false
+    return n.read_by_student_at == null
+  }, [])
 
   useEffect(() => {
     let ok = true
@@ -65,12 +73,55 @@ export default function ResourcesPage() {
   }, [authLoading, profile?.role, toast])
 
   useEffect(() => {
+    if (profile?.role !== 'student' || notes.length === 0) return
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const ent of entries) {
+          if (!ent.isIntersecting) continue
+          const el = ent.target
+          const id = el.getAttribute('data-note-id')
+          if (!id || noteMarkDone.current.has(id)) continue
+          const n = notes.find((x) => String(x.id) === id)
+          if (!n || !noteIsUnread(n)) continue
+          noteMarkDone.current.add(id)
+          api(`/notes/${id}/mark-read`, { method: 'POST' })
+            .then(() => {
+              setNotes((prev) =>
+                prev.map((x) =>
+                  String(x.id) === id
+                    ? { ...x, is_unread: false, read_by_student_at: new Date().toISOString() }
+                    : x
+                )
+              )
+              dispatchNotesReadChanged()
+            })
+            .catch(() => {
+              noteMarkDone.current.delete(id)
+            })
+        }
+      },
+      { root: null, threshold: 0.35, rootMargin: '0px' }
+    )
+    document.querySelectorAll('[data-mentor-note-card]').forEach((node) => obs.observe(node))
+    return () => obs.disconnect()
+  }, [notes, profile?.role, noteIsUnread])
+
+  useEffect(() => {
     if (loc.hash !== '#contratos') return
     const t = requestAnimationFrame(() => {
       document.getElementById('contratos')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
     return () => cancelAnimationFrame(t)
   }, [loc.hash, loc.pathname])
+
+  useEffect(() => {
+    const m = loc.hash?.match(/^#nota-(\d+)$/)
+    if (!m) return
+    const t = requestAnimationFrame(() => {
+      document.getElementById(`nota-${m[1]}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(t)
+  }, [loc.hash, loc.pathname, notes.length])
 
   useEffect(() => {
     return () => {
@@ -214,10 +265,28 @@ export default function ResourcesPage() {
                   })()
                 : []
             const fileList = Array.isArray(n.attachment_files) ? n.attachment_files : []
+            const unread = noteIsUnread(n)
             return (
-              <li key={n.id} className="rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">
+              <li
+                key={n.id}
+                id={`nota-${n.id}`}
+                data-mentor-note-card="true"
+                data-note-id={String(n.id)}
+                className={`scroll-mt-6 rounded-lg border p-4 text-sm shadow-sm ${
+                  unread
+                    ? 'border-l-4 border-l-indigo-500 border-slate-200 bg-indigo-50/50'
+                    : 'border-slate-200 bg-white'
+                }`}
+              >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  {n.title && <p className="font-semibold text-slate-900">{n.title}</p>}
+                  <p className="font-semibold text-slate-900">
+                    {n.title ? String(n.title) : 'Nota do mentor'}
+                    {unread && (
+                      <span className="ml-2 inline-block rounded bg-indigo-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-indigo-900">
+                        Nova
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-slate-500">
                     {formatPt(n.created_at)}
                     {n.updated_at && String(n.updated_at) !== String(n.created_at)

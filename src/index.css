@@ -1,1 +1,192 @@
 @import "tailwindcss";
+
+/* Editor de notas (TipTap) — restaurar estilos que o Preflight do Tailwind remove dentro do ProseMirror */
+.mentor-tiptap-editor .ProseMirror {
+  outline: none;
+  min-height: 7rem;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: #1e293b;
+}
+
+.mentor-tiptap-editor .ProseMirror p {
+  margin: 0.4rem 0;
+}
+
+.mentor-tiptap-editor .ProseMirror > *:first-child {
+  margin-top: 0;
+}
+
+.mentor-tiptap-editor .ProseMirror > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Parágrafos dentro de listas (estrutura TipTap: ul > li > p) */
+.mentor-tiptap-editor .ProseMirror li p {
+  margin: 0.15rem 0;
+}
+
+.mentor-tiptap-editor .ProseMirror h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0.65rem 0 0.35rem;
+  color: #0f172a;
+}
+
+.mentor-tiptap-editor .ProseMirror h3 {
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 0.55rem 0 0.3rem;
+  color: #1e293b;
+}
+
+.mentor-tiptap-editor .ProseMirror ul {
+  list-style-type: disc;
+  list-style-position: outside;
+  margin: 0.45rem 0;
+  padding-left: 1.5rem;
+}
+
+.mentor-tiptap-editor .ProseMirror ol {
+  list-style-type: decimal;
+  list-style-position: outside;
+  margin: 0.45rem 0;
+  padding-left: 1.5rem;
+}
+
+.mentor-tiptap-editor .ProseMirror li {
+  display: list-item;
+  margin: 0.2rem 0;
+}
+
+.mentor-tiptap-editor .ProseMirror ul ul,
+.mentor-tiptap-editor .ProseMirror ol ol,
+.mentor-tiptap-editor .ProseMirror ul ol,
+.mentor-tiptap-editor .ProseMirror ol ul {
+  margin: 0.2rem 0;
+}
+
+.mentor-tiptap-editor .ProseMirror blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.85rem;
+  border-left: 3px solid #94a3b8;
+  color: #475569;
+}
+
+.mentor-tiptap-editor .ProseMirror hr {
+  margin: 0.85rem 0;
+  border: 0;
+  border-top: 1px solid #cbd5e1;
+}
+
+.mentor-tiptap-editor .ProseMirror code {
+  font-size: 0.85em;
+  background: #f1f5f9;
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+}
+
+.mentor-tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #94a3b8;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Conteúdo rico das notas (aluno / pré-visualização) */
+.mentor-note-rich {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  overflow: visible;
+}
+
+.mentor-note-rich p {
+  margin: 0.5em 0;
+}
+.mentor-note-rich p:first-child {
+  margin-top: 0;
+}
+.mentor-note-rich p:last-child {
+  margin-bottom: 0;
+}
+
+/* TipTap: li > p — evitar margens a repelir marcadores */
+.mentor-note-rich li p {
+  margin: 0.15rem 0;
+}
+
+.mentor-note-rich h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0.75rem 0 0.35rem;
+  color: #0f172a;
+}
+.mentor-note-rich h3 {
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin: 0.65rem 0 0.3rem;
+  color: #1e293b;
+}
+
+/* Preflight / utilitários Tailwind removem list-style nos ul/ol — !important garante no portal do aluno */
+.mentor-note-rich ul {
+  list-style: disc outside !important;
+  margin: 0.45rem 0;
+  padding-left: 1.5rem !important;
+  padding-inline-start: 1.5rem !important;
+}
+
+.mentor-note-rich ol {
+  list-style: decimal outside !important;
+  margin: 0.45rem 0;
+  padding-left: 1.5rem !important;
+  padding-inline-start: 1.5rem !important;
+}
+
+.mentor-note-rich li {
+  display: list-item !important;
+  margin: 0.2rem 0;
+}
+
+.mentor-note-rich ul ul,
+.mentor-note-rich ol ol,
+.mentor-note-rich ul ol,
+.mentor-note-rich ol ul {
+  margin: 0.25rem 0;
+}
+
+.mentor-note-rich ul ul {
+  list-style: circle outside !important;
+}
+
+.mentor-note-rich ul ul ul {
+  list-style: square outside !important;
+}
+.mentor-note-rich blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid #cbd5e1;
+  color: #475569;
+}
+.mentor-note-rich hr {
+  margin: 0.75rem 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+}
+.mentor-note-rich code {
+  font-size: 0.85em;
+  background: #f1f5f9;
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+}
+.mentor-note-rich pre {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border-radius: 0.375rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}

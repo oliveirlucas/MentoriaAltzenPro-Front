@@ -55,6 +55,8 @@ import {
   sessionAttributionLabelPt,
   sessionReasonLabelPt,
 } from '../lib/calendarSessionLabels.js'
+import { normalizeTipTapBody, stripHtmlToPlain } from '../lib/noteHtml.js'
+import MentorNoteRichTextEditor from '../components/MentorNoteRichTextEditor.jsx'
 
 const NOTE_ANEXOS_MAX = 8
 
@@ -124,6 +126,7 @@ export default function AdminStudentDetail() {
   const [noteRemovedFileIds, setNoteRemovedFileIds] = useState([])
   const [editingNoteId, setEditingNoteId] = useState(null)
   const [noteSaving, setNoteSaving] = useState(false)
+  const [noteDraftKey, setNoteDraftKey] = useState(0)
   const noteFileInputRef = useRef(null)
 
   const [cadEmail, setCadEmail] = useState('')
@@ -261,6 +264,7 @@ export default function AdminStudentDetail() {
     setNoteExistingFiles([])
     setNoteRemovedFileIds([])
     setEditingNoteId(null)
+    setNoteDraftKey((k) => k + 1)
   }, [id])
 
   useEffect(() => {
@@ -329,6 +333,7 @@ export default function AdminStudentDetail() {
     setNoteExistingFiles([])
     setNoteRemovedFileIds([])
     setEditingNoteId(null)
+    setNoteDraftKey((k) => k + 1)
   }, [])
 
   const startEditNote = useCallback((note) => {
@@ -398,7 +403,7 @@ export default function AdminStudentDetail() {
       }
       const basePayload = {
         title: title.trim() || null,
-        body: body.trim() || null,
+        body: normalizeTipTapBody(body),
         visible_to_student: noteVisibleToStudent,
         attachment_links: linksPayload,
       }
@@ -1556,7 +1561,9 @@ export default function AdminStudentDetail() {
                   {ev.kind === 'nota' && ev.sub && (
                     <p className="text-xs text-slate-500">{ev.sub}</p>
                   )}
-                  {ev.body && <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-slate-600">{ev.body}</p>}
+                  {ev.body && (
+                    <p className="mt-1 line-clamp-3 text-sm text-slate-600">{stripHtmlToPlain(ev.body)}</p>
+                  )}
                   {ev.kind === 'nota' && ev.noteId != null && (() => {
                     const n = (data?.notes || []).find((x) => x.id === ev.noteId)
                     if (!n) return null
@@ -1596,8 +1603,8 @@ export default function AdminStudentDetail() {
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h2 className="text-lg font-bold text-slate-900">Notas ao aluno</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Texto, links (https) e anexos PDF ou imagem. Aparecem em Recursos do aluno quando estiverem{' '}
-          <strong>visíveis</strong>. Para relatório só da mentoria (o aluno não vê), use{' '}
+          Conteúdo com <strong>formatação</strong> (negrito, títulos, listas, links no texto), mais links e anexos em
+          baixo. Aparece em Recursos quando estiver <strong>visível</strong>. Para relatório só da mentoria, use{' '}
           <Link
             to={`/admin/alunos/${id}/anotacoes-internas`}
             className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
@@ -1664,13 +1671,16 @@ export default function AdminStudentDetail() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
-          <textarea
-            className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-            rows={4}
-            placeholder="Conteúdo da mensagem"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Mensagem</p>
+            <MentorNoteRichTextEditor
+              key={editingNoteId != null ? `edit-${editingNoteId}` : `draft-${noteDraftKey}`}
+              initialContent={body}
+              onChange={setBody}
+              disabled={noteSaving}
+              placeholder="Escreva para o aluno. Use a barra para negrito, secções e listas."
+            />
+          </div>
 
           <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
             <p className="flex items-center gap-1 text-xs font-semibold uppercase text-slate-500">

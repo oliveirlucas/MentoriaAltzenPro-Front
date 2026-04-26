@@ -315,7 +315,7 @@ export default function Dashboard() {
             )}
             {futureStart && (
               <p className="mt-2 text-xs text-slate-600">
-                O programa ainda não começou — a contagem começa na data de início acima.
+                O programa ainda não começou, a contagem começa na data de início acima.
               </p>
             )}
           </div>
@@ -392,7 +392,7 @@ export default function Dashboard() {
         <p className="mt-1 text-sm text-slate-600">
           Sessões associadas à sua conta no portal. Quando o mentor o associa a um agendamento, o Google envia convite
           para o e-mail da sua conta (aparece na sua agenda, por exemplo no Google Calendar). O estado de cada encontro
-          (realizada, não realizada, cancelada) e o registo visível abaixo são definidos pelo mentor — refletem o que
+          (realizada, não realizada, cancelada) e o registo visível abaixo são definidos pelo mentor, refletem o que
           ocorreu na prática, independentemente do dia no programa (90 dias).
         </p>
 

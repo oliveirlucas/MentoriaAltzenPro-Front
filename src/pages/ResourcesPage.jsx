@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 import { api, apiBlob } from '../lib/api.js'
 import { dispatchNotesReadChanged } from '../components/StudentNotesBell.jsx'
+import { MentorNoteBodyOrPlain } from '../components/MentorNoteBody.jsx'
 import { ScrollText, Eye, X, Link2, Paperclip } from 'lucide-react'
 
 function formatPt(iso) {
@@ -294,7 +295,7 @@ export default function ResourcesPage() {
                       : ''}
                   </p>
                 </div>
-                {n.body && <p className="mt-2 whitespace-pre-wrap text-slate-700">{n.body}</p>}
+                {n.body ? <MentorNoteBodyOrPlain body={n.body} className="mt-2 text-slate-700" /> : null}
                 {linkList.length > 0 && (
                   <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2">
                     <p className="flex items-center gap-1 text-xs font-semibold uppercase text-slate-500">

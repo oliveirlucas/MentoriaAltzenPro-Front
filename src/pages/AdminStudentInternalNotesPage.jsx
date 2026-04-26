@@ -16,6 +16,9 @@ import {
 import { useAuth } from '../context/AuthContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 import { api, apiBlob } from '../lib/api.js'
+import { normalizeTipTapBody } from '../lib/noteHtml.js'
+import { MentorNoteBodyOrPlain } from '../components/MentorNoteBody.jsx'
+import MentorNoteRichTextEditor from '../components/MentorNoteRichTextEditor.jsx'
 
 const NOTE_ANEXOS_MAX = 8
 
@@ -59,6 +62,7 @@ export default function AdminStudentInternalNotesPage() {
   const [noteRemovedFileIds, setNoteRemovedFileIds] = useState([])
   const [editingNoteId, setEditingNoteId] = useState(null)
   const [noteSaving, setNoteSaving] = useState(false)
+  const [noteDraftKey, setNoteDraftKey] = useState(0)
   const noteFileInputRef = useRef(null)
 
   const load = useCallback(async () => {
@@ -83,6 +87,18 @@ export default function AdminStudentInternalNotesPage() {
     load()
   }, [profile?.role, load])
 
+  useEffect(() => {
+    setTitle('')
+    setBody('')
+    setNoteVisibleToStudent(false)
+    setNoteLinks([{ label: '', url: '' }])
+    setNotePendingFiles([])
+    setNoteExistingFiles([])
+    setNoteRemovedFileIds([])
+    setEditingNoteId(null)
+    setNoteDraftKey((k) => k + 1)
+  }, [id])
+
   const resetNoteComposer = useCallback(() => {
     setTitle('')
     setBody('')
@@ -92,6 +108,7 @@ export default function AdminStudentInternalNotesPage() {
     setNoteExistingFiles([])
     setNoteRemovedFileIds([])
     setEditingNoteId(null)
+    setNoteDraftKey((k) => k + 1)
   }, [])
 
   const startEditNote = useCallback((note) => {
@@ -179,7 +196,7 @@ export default function AdminStudentInternalNotesPage() {
       }
       const basePayload = {
         title: title.trim() || null,
-        body: body.trim() || null,
+        body: normalizeTipTapBody(body),
         visible_to_student: editingNoteId != null ? noteVisibleToStudent : false,
         attachment_links: linksPayload,
       }
@@ -303,7 +320,8 @@ export default function AdminStudentInternalNotesPage() {
               {editingNoteId != null ? `Editar entrada #${editingNoteId}` : 'Nova entrada'}
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Ex.: resumo de sessão, combinados, riscos, próximos passos — o que precisar de consultar depois.
+              Ex.: resumo de sessão, combinados, riscos, próximos passos. Use a barra de ferramentas para negrito,
+              títulos, listas e links no texto; em baixo, links e anexos extra.
             </p>
 
             <form onSubmit={saveNote} className="mt-4 space-y-3 rounded-xl border border-dashed border-slate-300 p-4">
@@ -333,13 +351,16 @@ export default function AdminStudentInternalNotesPage() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
-              <textarea
-                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                rows={6}
-                placeholder="Texto livre…"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-              />
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-600">Conteúdo</p>
+                <MentorNoteRichTextEditor
+                  key={editingNoteId != null ? `edit-${editingNoteId}` : `draft-${noteDraftKey}`}
+                  initialContent={body}
+                  onChange={setBody}
+                  disabled={noteSaving}
+                  placeholder="Texto livre com formatação — negrito, secções, listas…"
+                />
+              </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
                 <p className="flex items-center gap-1 text-xs font-semibold uppercase text-slate-500">
@@ -504,7 +525,7 @@ export default function AdminStudentInternalNotesPage() {
                       </button>
                     </div>
                     {n.body ? (
-                      <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700">{n.body}</p>
+                      <MentorNoteBodyOrPlain body={n.body} className="mt-3 text-sm text-slate-700" />
                     ) : null}
                     {Array.isArray(n.attachment_links) && n.attachment_links.length > 0 && (
                       <ul className="mt-2 space-y-1 text-sm">

@@ -30,6 +30,7 @@ import {
   Eye,
   Trash2,
   ScrollText,
+  Lock,
   Plus,
   Link2,
   Paperclip,
@@ -44,9 +45,16 @@ import {
   getEnrollmentCycleProgress,
   getPlanoSummary,
   isLiveFormPredatesPrimaryEnrollment,
+  isProgramStartDateInFuture,
   FORM_TYPES,
 } from '../lib/adminStudentInsight.js'
 import { formatProgramType } from '../lib/programType.js'
+import {
+  sessionStatusLabelPt,
+  sessionStatusChipClass,
+  sessionAttributionLabelPt,
+  sessionReasonLabelPt,
+} from '../lib/calendarSessionLabels.js'
 
 const NOTE_ANEXOS_MAX = 8
 
@@ -81,20 +89,6 @@ function formatPt(iso) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
-}
-
-function calendarSessionStatusPt(status) {
-  if (status === 'completed') return 'Realizada'
-  if (status === 'cancelled') return 'Cancelada'
-  if (status === 'scheduled') return 'Agendada'
-  return status || '—'
-}
-
-function calendarSessionChip(status) {
-  if (status === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-900'
-  if (status === 'cancelled') return 'border-slate-300 bg-slate-100 text-slate-700'
-  if (status === 'scheduled') return 'border-amber-200 bg-amber-50 text-amber-900'
-  return 'border-slate-200 bg-slate-50 text-slate-600'
 }
 
 function toDateInput(iso) {
@@ -726,9 +720,11 @@ export default function AdminStudentDetail() {
     completed: 0,
     scheduled: 0,
     cancelled: 0,
+    not_held: 0,
   }
   const calSessions = data.calendar_sessions ?? []
   const dayPercent = health?.day != null ? Math.min(100, Math.round((health.day / 90) * 100)) : null
+  const notesVisibleToStudent = (data.notes || []).filter((n) => n.visible_to_student !== false)
 
   return (
     <div className="space-y-8 pb-12">
@@ -801,6 +797,13 @@ export default function AdminStudentDetail() {
             <BookOpen className="h-4 w-4" />
             Plano 90 dias
           </Link>
+          <Link
+            to={`/admin/alunos/${id}/anotacoes-internas`}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white backdrop-blur transition hover:bg-white/20"
+          >
+            <Lock className="h-4 w-4" />
+            Anotações internas
+          </Link>
         </div>
       </div>
 
@@ -871,6 +874,17 @@ export default function AdminStudentDetail() {
             {primaryEnrollment?.started_at == null && (
               <p className="mt-2 text-xs text-amber-700">Defina o início na inscrição para acompanhar o ritmo.</p>
             )}
+            {health.day == null &&
+              primaryEnrollment?.started_at &&
+              isProgramStartDateInFuture(primaryEnrollment.started_at) && (
+                <p className="mt-2 text-xs text-slate-600">
+                  Início previsto em{' '}
+                  <strong>
+                    {new Date(primaryEnrollment.started_at).toLocaleDateString('pt-BR', { dateStyle: 'medium' })}
+                  </strong>
+                  . O dia 1 do programa é nessa data — até lá não há contagem de dias.
+                </p>
+              )}
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 text-slate-500">
@@ -881,6 +895,11 @@ export default function AdminStudentDetail() {
               {health.week != null ? `Semana ${health.week} / 12` : '—'}
             </p>
             <p className="mt-2 text-xs text-slate-500">Baseada no início da inscrição (1 aula/sem. típica).</p>
+            {health.week == null &&
+              primaryEnrollment?.started_at &&
+              isProgramStartDateInFuture(primaryEnrollment.started_at) && (
+                <p className="mt-1 text-xs text-slate-600">A semana 1 passa a aplicar a partir do dia de início.</p>
+              )}
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 text-slate-500">
@@ -891,7 +910,10 @@ export default function AdminStudentDetail() {
             {health.daysSincePlano != null && (
               <p className="mt-1 text-xs text-slate-600">Há {health.daysSincePlano} dia(s) sem registro (salvamento automático).</p>
             )}
-            {!health.hasPlano && <p className="mt-1 text-xs text-amber-700">Nenhum plano salvo ainda.</p>}
+            {!health.hasPlano &&
+              !(primaryEnrollment?.started_at && isProgramStartDateInFuture(primaryEnrollment.started_at)) && (
+                <p className="mt-1 text-xs text-amber-700">Nenhum plano salvo ainda.</p>
+              )}
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 text-slate-500">
@@ -899,7 +921,10 @@ export default function AdminStudentDetail() {
               <span className="text-xs font-medium uppercase">Últ. diagnóstico</span>
             </div>
             <p className="mt-1 text-sm font-semibold text-slate-800">{formatPt(health.lastDiagAt)}</p>
-            {!health.hasDiag && <p className="mt-1 text-xs text-amber-700">Ainda sem diagnóstico salvo.</p>}
+            {!health.hasDiag &&
+              !(primaryEnrollment?.started_at && isProgramStartDateInFuture(primaryEnrollment.started_at)) && (
+                <p className="mt-1 text-xs text-amber-700">Ainda sem diagnóstico salvo.</p>
+              )}
           </div>
         </div>
       )}
@@ -963,7 +988,13 @@ export default function AdminStudentDetail() {
                         <span className="text-slate-600">
                           {prog?.refLabel === 'sem data de início'
                             ? 'Sem data de início — defina nas linhas abaixo para ver o ritmo histórico.'
-                            : '—'}
+                            : prog?.refLabel === 'antes do início'
+                              ? `Início previsto ${
+                                  en.started_at
+                                    ? new Date(en.started_at).toLocaleDateString('pt-BR', { dateStyle: 'medium' })
+                                    : '—'
+                                } — ritmo (dia/semana) só após essa data.`
+                              : '—'}
                         </span>
                       )}
                     </p>
@@ -1253,7 +1284,7 @@ export default function AdminStudentDetail() {
             </p>
           </div>
         </div>
-        <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total registrado</p>
             <p className="mt-1 text-2xl font-bold text-slate-900">{calCounts.total}</p>
@@ -1261,16 +1292,22 @@ export default function AdminStudentDetail() {
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
             <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">Realizadas</p>
             <p className="mt-1 text-2xl font-bold text-emerald-950">{calCounts.completed}</p>
-            <p className="mt-1 text-xs text-emerald-900">Aulas marcadas como concluídas</p>
+            <p className="mt-1 text-xs text-emerald-900">Encontro realizado</p>
           </div>
           <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
             <p className="text-xs font-medium uppercase tracking-wide text-amber-900">Agendadas</p>
             <p className="mt-1 text-2xl font-bold text-amber-950">{calCounts.scheduled}</p>
-            <p className="mt-1 text-xs text-amber-900">Inclui futuras e por marcar como realizadas</p>
+            <p className="mt-1 text-xs text-amber-900">Futuras ou por fechar</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Canceladas</p>
             <p className="mt-1 text-2xl font-bold text-slate-800">{calCounts.cancelled}</p>
+            <p className="mt-1 text-xs text-slate-600">Cancelamento com registo</p>
+          </div>
+          <div className="rounded-xl border border-rose-200 bg-rose-50/60 px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-rose-900">Não realizadas</p>
+            <p className="mt-1 text-2xl font-bold text-rose-950">{calCounts.not_held ?? 0}</p>
+            <p className="mt-1 text-xs text-rose-900">Falta, no-show, etc.</p>
           </div>
         </div>
         {calSessions.length === 0 ? (
@@ -1289,9 +1326,9 @@ export default function AdminStudentDetail() {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium text-slate-900">{row.title || '(sem título)'}</p>
                     <span
-                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${calendarSessionChip(row.session_status)}`}
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${sessionStatusChipClass(row.session_status)}`}
                     >
-                      {calendarSessionStatusPt(row.session_status)}
+                      {sessionStatusLabelPt(row.session_status)}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-slate-600">
@@ -1299,6 +1336,19 @@ export default function AdminStudentDetail() {
                     {row.ends_at ? ` · até ${formatPt(row.ends_at)}` : ''}
                     {row.time_zone ? ` · ${row.time_zone}` : ''}
                   </p>
+                  {(row.session_reason_code || row.session_attribution) && (
+                    <p className="mt-2 text-xs text-slate-700">
+                      <span className="font-medium text-slate-800">Registo:</span>{' '}
+                      {sessionAttributionLabelPt(row.session_attribution)} ·{' '}
+                      {sessionReasonLabelPt(row.session_reason_code)}
+                      {row.session_reason_note ? ` — ${row.session_reason_note}` : ''}
+                    </p>
+                  )}
+                  {row.mentor_private_note ? (
+                    <p className="mt-1 rounded border border-slate-200 bg-slate-100/80 px-2 py-1 text-xs text-slate-600">
+                      <span className="font-semibold text-slate-700">Nota interna:</span> {row.mentor_private_note}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   {row.meet_link ? (
@@ -1507,19 +1557,31 @@ export default function AdminStudentDetail() {
                     <p className="text-xs text-slate-500">{ev.sub}</p>
                   )}
                   {ev.body && <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-slate-600">{ev.body}</p>}
-                  {ev.kind === 'nota' && ev.noteId != null && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const n = (data?.notes || []).find((x) => x.id === ev.noteId)
-                        if (n) startEditNote(n)
-                      }}
-                      className="mt-2 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      <Pencil className="h-3.5 w-3.5" aria-hidden />
-                      Editar nota
-                    </button>
-                  )}
+                  {ev.kind === 'nota' && ev.noteId != null && (() => {
+                    const n = (data?.notes || []).find((x) => x.id === ev.noteId)
+                    if (!n) return null
+                    if (n.visible_to_student === false) {
+                      return (
+                        <Link
+                          to={`/admin/alunos/${id}/anotacoes-internas?edit=${ev.noteId}`}
+                          className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-950 hover:bg-amber-100"
+                        >
+                          <Lock className="h-3.5 w-3.5" aria-hidden />
+                          Ver na ficha interna
+                        </Link>
+                      )
+                    }
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => startEditNote(n)}
+                        className="mt-2 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden />
+                        Editar nota
+                      </button>
+                    )
+                  })()}
                   {ev.kind === 'inscricao' && ev.details && (
                     <p className="text-sm text-slate-600">{ev.details}</p>
                   )}
@@ -1534,13 +1596,20 @@ export default function AdminStudentDetail() {
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h2 className="text-lg font-bold text-slate-900">Notas ao aluno</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Texto, links (https) e anexos PDF ou imagem. Aparecem em Recursos do aluno quando estiverem visíveis. Pode
-          editar uma nota depois de criada.
+          Texto, links (https) e anexos PDF ou imagem. Aparecem em Recursos do aluno quando estiverem{' '}
+          <strong>visíveis</strong>. Para relatório só da mentoria (o aluno não vê), use{' '}
+          <Link
+            to={`/admin/alunos/${id}/anotacoes-internas`}
+            className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+          >
+            Anotações internas
+          </Link>
+          .
         </p>
 
-        {(data.notes || []).length > 0 && (
+        {notesVisibleToStudent.length > 0 && (
           <ul className="mt-4 space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-sm">
-            {(data.notes || []).map((n) => (
+            {notesVisibleToStudent.map((n) => (
               <li
                 key={n.id}
                 className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
@@ -1550,7 +1619,6 @@ export default function AdminStudentDetail() {
                   <p className="text-xs text-slate-500">
                     {formatPt(n.created_at)}
                     {n.updated_at && n.updated_at !== n.created_at ? ` · editada ${formatPt(n.updated_at)}` : ''}
-                    {n.visible_to_student === false ? ' · oculta ao aluno' : ''}
                   </p>
                 </div>
                 <button

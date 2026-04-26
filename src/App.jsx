@@ -8,6 +8,7 @@ import Plano90DiasPage from './pages/Plano90DiasPage.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import AdminDashboard from './pages/AdminDashboard.jsx'
 import AdminStudentDetail from './pages/AdminStudentDetail.jsx'
+import AdminStudentInternalNotesPage from './pages/AdminStudentInternalNotesPage.jsx'
 import AdminCalendarPage from './pages/AdminCalendarPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
 import ResourcesPage from './pages/ResourcesPage.jsx'
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/calendario" element={<AdminCalendarPage />} />
             <Route path="/admin/alunos/:id" element={<AdminStudentDetail />} />
+            <Route path="/admin/alunos/:id/anotacoes-internas" element={<AdminStudentInternalNotesPage />} />
             <Route path="/admin/alunos/:id/diagnostico" element={<DiagnosticoPage />} />
             <Route path="/admin/alunos/:id/plano-90-dias" element={<Plano90DiasPage />} />
           </Route>

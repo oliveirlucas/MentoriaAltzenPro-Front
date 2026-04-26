@@ -3,10 +3,20 @@ import { Link, Navigate } from 'react-router-dom'
 import { NOTES_READ_CHANGED } from '../components/StudentNotesBell.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
-import { FileText, Calendar, ArrowRight, TrendingUp, ScrollText, Video, ExternalLink } from 'lucide-react'
+import { FileText, Calendar, ArrowRight, ScrollText, Video, ExternalLink, Target, Activity } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { formatProgramType } from '../lib/programType.js'
-import { getEnrollmentCycleProgress, FORM_TYPES } from '../lib/adminStudentInsight.js'
+import {
+  getEnrollmentCycleProgress,
+  isLiveFormPredatesPrimaryEnrollment,
+  isProgramStartDateInFuture,
+  FORM_TYPES,
+} from '../lib/adminStudentInsight.js'
+import {
+  sessionStatusLabelPt,
+  sessionAttributionLabelPt,
+  sessionReasonLabelPt,
+} from '../lib/calendarSessionLabels.js'
 import { useEffect, useState } from 'react'
 
 function formatDatePt(iso) {
@@ -45,17 +55,21 @@ function archivesByEnrollment(archiveRows) {
   return [...m.values()].sort((a, b) => b.enrollment_id - a.enrollment_id)
 }
 
-function sessionStatusLabel(status) {
-  if (status === 'completed') return 'Concluída'
-  if (status === 'cancelled') return 'Cancelada'
-  if (status === 'scheduled') return 'Agendada'
-  return status || '—'
+function SessionRegistroAluno({ s }) {
+  if (!s?.session_reason_code && !s?.session_attribution) return null
+  return (
+    <p className="mt-2 text-xs text-slate-700">
+      <span className="font-medium text-slate-800">Registo:</span>{' '}
+      {sessionAttributionLabelPt(s.session_attribution)} · {sessionReasonLabelPt(s.session_reason_code)}
+      {s.session_reason_note ? ` — ${s.session_reason_note}` : ''}
+    </p>
+  )
 }
 
 export default function Dashboard() {
   const { profile, enrollments, enrollmentFormArchives, user } = useAuth()
   const toast = useToast()
-  const [lastActivity, setLastActivity] = useState(null)
+  const [formActivity, setFormActivity] = useState({ diagAt: null, planoAt: null })
   const [calendarSessions, setCalendarSessions] = useState([])
   const [mentorNotesUnread, setMentorNotesUnread] = useState(0)
 
@@ -91,33 +105,76 @@ export default function Dashboard() {
     [calendarSessions]
   )
 
+  const notHeldSessions = useMemo(
+    () => (calendarSessions || []).filter((s) => s.session_status === 'not_held'),
+    [calendarSessions]
+  )
+
+  const sessionStats = useMemo(() => {
+    const list = calendarSessions || []
+    return {
+      completed: list.filter((s) => s.session_status === 'completed').length,
+      scheduled: list.filter((s) => s.session_status === 'scheduled').length,
+      cancelled: list.filter((s) => s.session_status === 'cancelled').length,
+      notHeld: list.filter((s) => s.session_status === 'not_held').length,
+    }
+  }, [calendarSessions])
+
   const portalDiag = profile?.portal_diagnostico_enabled === true
   const portalPlano = profile?.portal_plano_90_enabled === true
+
+  const currentEnrollment = enrollments?.[0]
+
+  const cycleProgress = useMemo(() => {
+    if (!currentEnrollment) return null
+    return getEnrollmentCycleProgress(currentEnrollment)
+  }, [currentEnrollment])
+
+  const dayPercent =
+    cycleProgress?.day != null ? Math.min(100, Math.round((cycleProgress.day / 90) * 100)) : null
 
   useEffect(() => {
     if (!user?.id) return
     let ok = true
     ;(async () => {
       try {
-        const reqs = []
-        if (portalDiag) reqs.push(api('/forms/altzen-diagnostico-carreira'))
-        if (portalPlano) reqs.push(api('/forms/altzen-plano-90-dias'))
-        if (!reqs.length) {
-          if (ok) setLastActivity(null)
+        if (!portalDiag && !portalPlano) {
+          if (ok) setFormActivity({ diagAt: null, planoAt: null })
           return
         }
-        const results = await Promise.all(reqs)
-        const times = results.map((r) => r.updated_at).filter(Boolean).map((t) => new Date(t).getTime())
-        if (ok && times.length) setLastActivity(new Date(Math.max(...times)).toLocaleString('pt-BR'))
-        if (ok && !times.length) setLastActivity(null)
+        const primary = enrollments?.[0]
+        const nEnr = enrollments?.length ?? 0
+        const next = { diagAt: null, planoAt: null }
+        if (portalDiag) {
+          const r = await api('/forms/altzen-diagnostico-carreira')
+          const u = r?.updated_at
+          if (u && primary && isLiveFormPredatesPrimaryEnrollment(primary, u, nEnr)) {
+            next.diagAt = null
+          } else {
+            next.diagAt = u || null
+          }
+        }
+        if (portalPlano) {
+          const r = await api('/forms/altzen-plano-90-dias')
+          const u = r?.updated_at
+          if (u && primary && isLiveFormPredatesPrimaryEnrollment(primary, u, nEnr)) {
+            next.planoAt = null
+          } else {
+            next.planoAt = u || null
+          }
+        }
+        if (ok) setFormActivity(next)
       } catch (e) {
-        if (ok) toast.error(e.message || 'Não foi possível carregar a última atividade nos formulários.')
+        if (ok) {
+          setFormActivity({ diagAt: null, planoAt: null })
+          toast.error(e.message || 'Não foi possível carregar as datas dos formulários.')
+        }
       }
     })()
     return () => {
       ok = false
     }
-  }, [user?.id, portalDiag, portalPlano, toast])
+  }, [user?.id, portalDiag, portalPlano, toast, enrollments])
 
   useEffect(() => {
     if (!user?.id || profile?.role === 'admin') return
@@ -175,10 +232,11 @@ export default function Dashboard() {
     return <Navigate to="/admin" replace />
   }
 
-  const current = enrollments?.[0]
+  const current = currentEnrollment
   const statusLabel = current?.state === 'concluida' ? 'Concluída' : current?.state || 'ativa'
   const program = formatProgramType(current?.program_type)
   const multiEnroll = (enrollments?.length || 0) > 1
+  const futureStart = Boolean(current?.started_at && isProgramStartDateInFuture(current.started_at))
 
   return (
     <div>
@@ -206,6 +264,126 @@ export default function Dashboard() {
         </div>
       )}
 
+      <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold text-slate-900">Ritmo no programa (ciclo atual)</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          <strong>Dia no programa</strong>: onde você está nos 90 dias (conta a partir da data de início).{' '}
+          <strong>Semana</strong>: semana de referência nesse mesmo percurso (cerca de 1 aula por semana). As datas dos
+          formulários são do <strong>ciclo atual</strong>; se você entrou em um ciclo novo, salve de novo no diagnóstico
+          ou no plano para atualizar.
+        </p>
+        {current ? (
+          <p className="mt-2 text-sm text-slate-700">
+            <span className="font-semibold text-slate-900">{program}</span>
+            <span className="text-slate-500"> · </span>
+            Inscrição <span className="font-mono">#{current.id}</span>
+            <span className="text-slate-500"> · </span>
+            Estado: {statusLabel}
+            {current.started_at && (
+              <>
+                <span className="text-slate-500"> · </span>
+                Início:{' '}
+                <span className="font-medium text-slate-800">
+                  {new Date(current.started_at).toLocaleDateString('pt-BR', { dateStyle: 'medium' })}
+                </span>
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-amber-800">Ainda sem inscrição associada à sua conta.</p>
+        )}
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-slate-500">
+              <Calendar className="h-4 w-4 shrink-0 text-indigo-600" aria-hidden />
+              <span className="text-xs font-medium uppercase tracking-wide">Dia no programa</span>
+            </div>
+            <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900">
+              {cycleProgress?.day != null ? `Dia ${cycleProgress.day} / 90` : '—'}
+            </p>
+            {cycleProgress?.day != null && dayPercent != null && (
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-indigo-500 transition-all"
+                  style={{ width: `${dayPercent}%` }}
+                />
+              </div>
+            )}
+            {current?.started_at == null && (
+              <p className="mt-2 text-xs text-amber-800">Quando o mentor definir a data de início, o dia aparece aqui.</p>
+            )}
+            {futureStart && (
+              <p className="mt-2 text-xs text-slate-600">
+                O programa ainda não começou — a contagem começa na data de início acima.
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-slate-500">
+              <Target className="h-4 w-4 shrink-0 text-indigo-600" aria-hidden />
+              <span className="text-xs font-medium uppercase tracking-wide">Semana (referência)</span>
+            </div>
+            <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900">
+              {cycleProgress?.week != null ? `Semana ${cycleProgress.week} / 12` : '—'}
+            </p>
+            <p className="mt-2 text-xs text-slate-500">Referência 1 aula por semana ao longo de 12 semanas.</p>
+            {futureStart && (
+              <p className="mt-1 text-xs text-slate-600">A semana 1 começa no dia de início do programa.</p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-slate-500">
+              <FileText className="h-4 w-4 shrink-0 text-blue-700" aria-hidden />
+              <span className="text-xs font-medium uppercase tracking-wide">Últ. diagnóstico</span>
+            </div>
+            {!portalDiag ? (
+              <p className="mt-2 text-sm text-slate-600">Disponível quando o mentor liberar o formulário.</p>
+            ) : (
+              <>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {formActivity.diagAt ? formatDateTimePt(formActivity.diagAt) : 'Ainda sem registro neste ciclo'}
+                </p>
+                {portalDiag && (
+                  <Link
+                    to="/diagnostico"
+                    className="mt-2 inline-flex text-xs font-medium text-blue-800 underline decoration-blue-300 hover:text-blue-950"
+                  >
+                    Abrir diagnóstico
+                  </Link>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-slate-500">
+              <Activity className="h-4 w-4 shrink-0 text-indigo-600" aria-hidden />
+              <span className="text-xs font-medium uppercase tracking-wide">Últ. plano 90 dias</span>
+            </div>
+            {!portalPlano ? (
+              <p className="mt-2 text-sm text-slate-600">Disponível quando o mentor liberar o formulário.</p>
+            ) : (
+              <>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {formActivity.planoAt ? formatDateTimePt(formActivity.planoAt) : 'Ainda sem registro neste ciclo'}
+                </p>
+                {portalPlano && (
+                  <Link
+                    to="/plano-90-dias"
+                    className="mt-2 inline-flex text-xs font-medium text-indigo-800 underline decoration-indigo-300 hover:text-indigo-950"
+                  >
+                    Abrir plano
+                  </Link>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
       <section className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex items-center gap-2 text-slate-800">
           <Calendar className="h-5 w-5 text-indigo-600" />
@@ -213,8 +391,22 @@ export default function Dashboard() {
         </div>
         <p className="mt-1 text-sm text-slate-600">
           Sessões associadas à sua conta no portal. Quando o mentor o associa a um agendamento, o Google envia convite
-          para o e-mail da sua conta (aparece na sua agenda, por exemplo no Google Calendar).
+          para o e-mail da sua conta (aparece na sua agenda, por exemplo no Google Calendar). O estado de cada encontro
+          (realizada, não realizada, cancelada) e o registo visível abaixo são definidos pelo mentor — refletem o que
+          ocorreu na prática, independentemente do dia no programa (90 dias).
         </p>
+
+        {calendarSessions.length > 0 && (
+          <p className="mt-3 text-sm font-medium text-slate-800">
+            Resumo: <span className="text-emerald-800">{sessionStats.completed} realizada(s)</span>
+            {' · '}
+            <span className="text-amber-900">{sessionStats.scheduled} agendada(s)</span>
+            {' · '}
+            <span className="text-slate-700">{sessionStats.cancelled} cancelada(s)</span>
+            {' · '}
+            <span className="text-rose-800">{sessionStats.notHeld} não realizada(s)</span>
+          </p>
+        )}
 
         {calendarSessions.length === 0 && (
           <p className="mt-4 text-sm text-slate-500">
@@ -239,7 +431,9 @@ export default function Dashboard() {
                     {s.mentor_full_name && (
                       <p className="mt-1 text-xs text-slate-500">Mentor: {s.mentor_full_name}</p>
                     )}
-                    <p className="mt-1 text-xs font-medium text-indigo-700">{sessionStatusLabel(s.session_status)}</p>
+                    <p className="mt-1 text-xs font-medium text-indigo-700">
+                      {sessionStatusLabelPt(s.session_status)}
+                    </p>
                     {s.meet_link && (
                       <a
                         href={s.meet_link}
@@ -270,7 +464,7 @@ export default function Dashboard() {
 
           {completedSessions.length > 0 && (
             <div className="mt-6">
-              <h3 className="text-sm font-semibold text-slate-800">Concluídas</h3>
+              <h3 className="text-sm font-semibold text-slate-800">Realizadas</h3>
               <ul className="mt-2 space-y-3">
                 {completedSessions.map((s) => (
                   <li
@@ -284,6 +478,10 @@ export default function Dashboard() {
                     {s.mentor_full_name && (
                       <p className="mt-1 text-xs text-slate-500">Mentor: {s.mentor_full_name}</p>
                     )}
+                    <p className="mt-1 text-xs font-medium text-emerald-800">
+                      {sessionStatusLabelPt(s.session_status)}
+                    </p>
+                    <SessionRegistroAluno s={s} />
                     {s.meet_link && (
                       <a
                         href={s.meet_link}
@@ -301,15 +499,50 @@ export default function Dashboard() {
             </div>
           )}
 
+          {notHeldSessions.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-rose-900">Não realizadas</h3>
+              <ul className="mt-2 space-y-3">
+                {notHeldSessions.map((s) => (
+                  <li
+                    key={s.id}
+                    className="rounded-lg border border-rose-200 bg-rose-50/50 px-4 py-3 text-sm text-slate-800"
+                  >
+                    <p className="font-medium text-slate-900">{s.title || 'Sessão'}</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      {formatDateTimePt(s.starts_at)} — {formatDateTimePt(s.ends_at)}
+                    </p>
+                    {s.mentor_full_name && (
+                      <p className="mt-1 text-xs text-slate-500">Mentor: {s.mentor_full_name}</p>
+                    )}
+                    <p className="mt-1 text-xs font-medium text-rose-900">
+                      {sessionStatusLabelPt(s.session_status)}
+                    </p>
+                    <SessionRegistroAluno s={s} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {cancelledSessions.length > 0 && (
             <div className="mt-6">
               <h3 className="text-sm font-semibold text-slate-600">Canceladas</h3>
-              <ul className="mt-2 space-y-2">
+              <ul className="mt-2 space-y-3">
                 {cancelledSessions.map((s) => (
-                  <li key={s.id} className="text-xs text-slate-500">
-                    <span className="font-medium text-slate-700">{s.title || 'Sessão'}</span>
-                    {' · '}
-                    {formatDateTimePt(s.starts_at)}
+                  <li
+                    key={s.id}
+                    className="rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-800"
+                  >
+                    <p className="font-medium text-slate-900">{s.title || 'Sessão'}</p>
+                    <p className="mt-1 text-xs text-slate-600">{formatDateTimePt(s.starts_at)}</p>
+                    {s.mentor_full_name && (
+                      <p className="mt-1 text-xs text-slate-500">Mentor: {s.mentor_full_name}</p>
+                    )}
+                    <p className="mt-1 text-xs font-medium text-slate-700">
+                      {sessionStatusLabelPt(s.session_status)}
+                    </p>
+                    <SessionRegistroAluno s={s} />
                   </li>
                 ))}
               </ul>
@@ -317,31 +550,12 @@ export default function Dashboard() {
           )}
       </section>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex items-center gap-2 text-slate-500">
-            <TrendingUp className="h-5 w-5" />
-            <span className="text-sm font-medium">Ciclo atual (inscrição)</span>
-          </div>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{program}</p>
-          <p className="text-sm text-slate-600">
-            Inscrição #{current?.id ?? '—'} · Estado: {statusLabel}
-          </p>
-          {current?.started_at && (
-            <p className="mt-1 text-xs text-slate-500">Início: {formatDatePt(current.started_at)}</p>
-          )}
-          {multiEnroll && (
-            <p className="mt-2 text-xs text-slate-500">
-              Há inscrições anteriores na sua conta — o portal usa sempre a linha mais recente para os formulários
-              editáveis abaixo.
-            </p>
-          )}
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm font-medium text-slate-500">Último salvamento (ciclo atual)</p>
-          <p className="mt-2 text-lg text-slate-900">{lastActivity || 'Ainda sem dados salvos neste ciclo'}</p>
-        </div>
-      </div>
+      {multiEnroll && (
+        <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          Há <strong>inscrições anteriores</strong> na sua conta — os formulários editáveis e o ritmo acima usam sempre a
+          inscrição mais recente.
+        </p>
+      )}
 
       <h2 className="mt-8 text-lg font-bold text-slate-800">Formulários do ciclo atual</h2>
       {portalDiag || portalPlano ? (
@@ -448,6 +662,13 @@ export default function Dashboard() {
                       {prog.week != null ? ` · semana ${prog.week}/12` : ''}
                     </p>
                   )}
+                  {prog?.day == null && prog?.refLabel === 'antes do início' && enRow?.started_at && (
+                    <p className="mt-1 text-xs text-slate-600">
+                      Ritmo ainda não aplicável — início em{' '}
+                      {new Date(enRow.started_at).toLocaleDateString('pt-BR', { dateStyle: 'medium' })} (contagem a
+                      partir desse dia).
+                    </p>
+                  )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     {g.diagAt && portalDiag && (
                       <Link
@@ -501,6 +722,12 @@ export default function Dashboard() {
                     <p className="mt-1 text-xs text-slate-600">
                       Ritmo de referência ({prog.refLabel}): dia {prog.day}/90
                       {prog.week != null ? ` · semana ${prog.week}/12` : ''}
+                    </p>
+                  )}
+                  {prog?.day == null && prog?.refLabel === 'antes do início' && en.started_at && (
+                    <p className="mt-1 text-xs text-slate-600">
+                      Ritmo ainda não aplicável — início em{' '}
+                      {new Date(en.started_at).toLocaleDateString('pt-BR', { dateStyle: 'medium' })}.
                     </p>
                   )}
                 </li>

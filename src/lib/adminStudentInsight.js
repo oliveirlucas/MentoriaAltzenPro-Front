@@ -83,7 +83,8 @@ function atMidnight(d) {
 }
 
 /**
- * Dia 1 = dia de início. Retorna 1..90 enquanto dentro do período, ou 90+ se ultrapassou.
+ * Dia 1 = primeiro dia civil do programa (data de início). Antes desse dia, retorna null.
+ * Depois: 1..90 enquanto dentro do período; após o 90.º dia continua 90 (teto).
  * @param {string|null|undefined} startedAt - ISO date do Postgres
  * @param {Date} [now]
  */
@@ -95,9 +96,24 @@ export function getDayInProgram(startedAt, now = new Date()) {
   const b = atMidnight(now)
   if (!a || !b) return null
   const diff = Math.floor((b - a) / 864e5) + 1
-  if (diff < 1) return 1
+  if (diff < 1) return null
   if (diff > 90) return 90
   return diff
+}
+
+/**
+ * Verdadeiro quando a data de início (calendário local) é estritamente posterior a `now`.
+ * @param {string|null|undefined} startedAt
+ * @param {Date} [now]
+ */
+export function isProgramStartDateInFuture(startedAt, now = new Date()) {
+  if (startedAt == null || String(startedAt).trim() === '') return false
+  const t0 = new Date(startedAt)
+  if (Number.isNaN(t0.getTime())) return false
+  const a = atMidnight(t0)
+  const b = atMidnight(now)
+  if (!a || !b) return false
+  return b < a
 }
 
 /**
@@ -133,6 +149,9 @@ export function getEnrollmentCycleProgress(enrollment, now = new Date()) {
   }
   const day = getDayInProgram(started, ref)
   const week = getExpectedMentorWeek12(day)
+  if (day == null && isProgramStartDateInFuture(started, ref)) {
+    return { day: null, week: null, refLabel: 'antes do início' }
+  }
   return { day, week, refLabel }
 }
 
@@ -155,6 +174,7 @@ export function computeMentorHealth({ enrollment, form_snapshots, now = new Date
 
   const day = getDayInProgram(started, now)
   const week = getExpectedMentorWeek12(day)
+  const notYetStarted = isProgramStartDateInFuture(started, now)
 
   const planU = by[FORM_TYPES.PLANO]?.updated_at
   const diaU = by[FORM_TYPES.DIAG]?.updated_at
@@ -170,22 +190,30 @@ export function computeMentorHealth({ enrollment, form_snapshots, now = new Date
   if (state === 'ativa' && (started == null || String(started).trim() === '')) {
     messages.push({ level: 'low', text: 'Defina a data de início da mentoria para acompanhar semanas e atraso.' })
   }
-  if (usePlano && state === 'ativa' && day && day > 1 && !planU) {
-    messages.push({ level: 'high', text: 'Plano 90 dias ainda sem registro com o programa em curso (início +2 dias ou mais).' })
-  } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 14 && day && day > 1) {
+  if (notYetStarted && (state === 'ativa' || state === 'agendada')) {
     messages.push({
-      level: 'high',
-      text: `Plano sem atualização há cerca de ${daysSincePlano} dia(s) — risco de atraso de execução (aulas/ritmo).`,
+      level: 'info',
+      text: 'A data de início ainda não chegou — dia e semana de referência só passam a contar a partir desse dia (dia 1 = dia de início).',
     })
-  } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 7) {
-    messages.push({
-      level: 'medium',
-      text: `Cerca de ${daysSincePlano} dia(s) sem novo salvamento do plano no portal.`,
-    })
-  } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 3) {
-    messages.push({ level: 'low', text: 'Alguns dias sem registro do plano — acompanhe na mentoria de rotina.' })
   }
-  if (useDiag && activeLike && !diaU) {
+  if (!notYetStarted) {
+    if (usePlano && state === 'ativa' && day && day > 1 && !planU) {
+      messages.push({ level: 'high', text: 'Plano 90 dias ainda sem registro com o programa em curso (início +2 dias ou mais).' })
+    } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 14 && day && day > 1) {
+      messages.push({
+        level: 'high',
+        text: `Plano sem atualização há cerca de ${daysSincePlano} dia(s) — risco de atraso de execução (aulas/ritmo).`,
+      })
+    } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 7) {
+      messages.push({
+        level: 'medium',
+        text: `Cerca de ${daysSincePlano} dia(s) sem novo salvamento do plano no portal.`,
+      })
+    } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 3) {
+      messages.push({ level: 'low', text: 'Alguns dias sem registro do plano — acompanhe na mentoria de rotina.' })
+    }
+  }
+  if (useDiag && activeLike && !diaU && !notYetStarted) {
     if (day && day >= 14) {
       messages.push({ level: 'medium', text: 'Diagnóstico ainda vazio após 2 semanas (recomendado no início do ciclo).' })
     } else if (day && day >= 7) {

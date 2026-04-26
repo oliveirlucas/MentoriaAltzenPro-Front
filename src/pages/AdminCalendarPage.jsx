@@ -4,6 +4,12 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
 import { api } from '../lib/api.js'
 import {
+  sessionStatusLabelPt,
+  sessionStatusChipClass,
+  SESSION_ATTRIBUTION_OPTIONS,
+  SESSION_REASON_OPTIONS,
+} from '../lib/calendarSessionLabels.js'
+import {
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -80,20 +86,6 @@ function isoToDateTimeParts(iso) {
   }
 }
 
-function sessionStatusLabel(s) {
-  if (s === 'completed') return 'Realizada'
-  if (s === 'cancelled') return 'Cancelada'
-  if (s === 'scheduled') return 'Agendada'
-  return '—'
-}
-
-function sessionChipClass(s) {
-  if (s === 'completed') return 'border-emerald-200 bg-emerald-50 text-emerald-900'
-  if (s === 'cancelled') return 'border-slate-300 bg-slate-100 text-slate-700'
-  if (s === 'scheduled') return 'border-amber-200 bg-amber-50 text-amber-900'
-  return 'border-slate-200 bg-slate-50 text-slate-600'
-}
-
 export default function AdminCalendarPage() {
   const { profile, loading: authLoading } = useAuth()
   const toast = useToast()
@@ -120,8 +112,19 @@ export default function AdminCalendarPage() {
   const [studentOptions, setStudentOptions] = useState([])
   const [formStudentId, setFormStudentId] = useState('')
   const [formSessionStatus, setFormSessionStatus] = useState('scheduled')
+  const [formSessionAttribution, setFormSessionAttribution] = useState('')
+  const [formSessionReasonCode, setFormSessionReasonCode] = useState('')
+  const [formSessionReasonNote, setFormSessionReasonNote] = useState('')
+  const [formMentorPrivateNote, setFormMentorPrivateNote] = useState('')
   const [editingEventId, setEditingEventId] = useState(null)
   const [eventActionBusy, setEventActionBusy] = useState(null)
+  const [outcomeModal, setOutcomeModal] = useState(null)
+  const [outcomeSaving, setOutcomeSaving] = useState(false)
+  const [outcomeStatus, setOutcomeStatus] = useState('not_held')
+  const [outcomeAttribution, setOutcomeAttribution] = useState('')
+  const [outcomeReasonCode, setOutcomeReasonCode] = useState('')
+  const [outcomeReasonNote, setOutcomeReasonNote] = useState('')
+  const [outcomePrivateNote, setOutcomePrivateNote] = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const deleteModalTitleId = useId()
@@ -270,6 +273,10 @@ export default function AdminCalendarPage() {
     setFormCreateMeet(true)
     setFormStudentId('')
     setFormSessionStatus('scheduled')
+    setFormSessionAttribution('')
+    setFormSessionReasonCode('')
+    setFormSessionReasonNote('')
+    setFormMentorPrivateNote('')
     setEditingEventId(null)
   }
 
@@ -287,7 +294,51 @@ export default function AdminCalendarPage() {
     setFormCreateMeet(!ev.meetLink)
     setFormStudentId(ev.student?.id != null ? String(ev.student.id) : '')
     setFormSessionStatus(ev.sessionStatus || 'scheduled')
+    setFormSessionAttribution(ev.sessionAttribution || '')
+    setFormSessionReasonCode(ev.sessionReasonCode || '')
+    setFormSessionReasonNote(ev.sessionReasonNote || '')
+    setFormMentorPrivateNote(ev.mentorPrivateNote || '')
     setShowForm(true)
+  }
+
+  const openOutcomeModal = (ev) => {
+    if (!ev?.sessionDbId) return
+    setOutcomeModal(ev)
+    setOutcomeStatus(ev.sessionStatus === 'cancelled' ? 'cancelled' : 'not_held')
+    setOutcomeAttribution(ev.sessionAttribution || '')
+    setOutcomeReasonCode(ev.sessionReasonCode || '')
+    setOutcomeReasonNote(ev.sessionReasonNote || '')
+    setOutcomePrivateNote(ev.mentorPrivateNote || '')
+  }
+
+  const submitOutcomeModal = async (e) => {
+    e.preventDefault()
+    const ev = outcomeModal
+    if (!ev?.id) return
+    if (!outcomeAttribution || !outcomeReasonCode) {
+      toast.error('Informe atribuição e motivo.')
+      return
+    }
+    setOutcomeSaving(true)
+    try {
+      await api(`/admin/google-calendar/events/${encodeURIComponent(ev.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          sessionStatus: outcomeStatus,
+          sessionAttribution: outcomeAttribution,
+          sessionReasonCode: outcomeReasonCode,
+          sessionReasonNote: outcomeReasonNote.trim() || null,
+          mentorPrivateNote: outcomePrivateNote.trim() || null,
+        }),
+      })
+      toast.success('Registo da sessão atualizado.')
+      setOutcomeModal(null)
+      await loadEvents()
+    } catch (err) {
+      toast.error(err.message || 'Erro ao guardar.')
+    } finally {
+      setOutcomeSaving(false)
+    }
   }
 
   const submitEvent = async (e) => {
@@ -302,6 +353,14 @@ export default function AdminCalendarPage() {
     }
     const wantedMeet = formCreateMeet
     setFormSaving(true)
+    if (
+      formStudentId &&
+      (formSessionStatus === 'cancelled' || formSessionStatus === 'not_held') &&
+      (!formSessionAttribution || !formSessionReasonCode)
+    ) {
+      toast.error('Para «Não realizada» ou «Cancelada», preencha atribuição e motivo.')
+      return
+    }
     const basePayload = {
       summary: formSummary.trim(),
       description: formDescription.trim() || undefined,
@@ -313,6 +372,16 @@ export default function AdminCalendarPage() {
       createMeet: wantedMeet,
       studentId: formStudentId ? Number(formStudentId) : null,
       sessionStatus: formSessionStatus,
+    }
+    if (
+      editingEventId &&
+      formStudentId &&
+      (formSessionStatus === 'cancelled' || formSessionStatus === 'not_held')
+    ) {
+      basePayload.sessionAttribution = formSessionAttribution
+      basePayload.sessionReasonCode = formSessionReasonCode
+      basePayload.sessionReasonNote = formSessionReasonNote.trim() || null
+      basePayload.mentorPrivateNote = formMentorPrivateNote.trim() || null
     }
     try {
       if (editingEventId) {
@@ -592,9 +661,71 @@ export default function AdminCalendarPage() {
                     >
                       <option value="scheduled">Agendada</option>
                       <option value="completed">Realizada</option>
+                      <option value="not_held">Não realizada</option>
                       <option value="cancelled">Cancelada</option>
                     </select>
                   </label>
+                ) : null}
+                {editingEventId &&
+                formStudentId &&
+                (formSessionStatus === 'not_held' || formSessionStatus === 'cancelled') ? (
+                  <>
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-slate-600">Atribuição (quem caracteriza a situação)</span>
+                      <select
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={formSessionAttribution}
+                        onChange={(e) => setFormSessionAttribution(e.target.value)}
+                        required
+                      >
+                        <option value="">— Escolher —</option>
+                        {SESSION_ATTRIBUTION_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-slate-600">Motivo</span>
+                      <select
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={formSessionReasonCode}
+                        onChange={(e) => setFormSessionReasonCode(e.target.value)}
+                        required
+                      >
+                        <option value="">— Escolher —</option>
+                        {SESSION_REASON_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-slate-600">
+                        Nota visível ao aluno (opcional)
+                      </span>
+                      <textarea
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        rows={2}
+                        value={formSessionReasonNote}
+                        onChange={(e) => setFormSessionReasonNote(e.target.value)}
+                        placeholder="Ex.: remarcamos para a terça; aluno avisou com 24h."
+                      />
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-slate-600">
+                        Nota interna (só mentor, não aparece ao aluno)
+                      </span>
+                      <textarea
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        rows={2}
+                        value={formMentorPrivateNote}
+                        onChange={(e) => setFormMentorPrivateNote(e.target.value)}
+                      />
+                    </label>
+                  </>
                 ) : null}
                 <label className="block">
                   <span className="text-xs font-medium text-slate-600">Data de início</span>
@@ -725,9 +856,9 @@ export default function AdminCalendarPage() {
                               <p className="font-medium text-slate-900">{ev.summary}</p>
                               {ev.sessionStatus ? (
                                 <span
-                                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${sessionChipClass(ev.sessionStatus)}`}
+                                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${sessionStatusChipClass(ev.sessionStatus)}`}
                                 >
-                                  {sessionStatusLabel(ev.sessionStatus)}
+                                  {sessionStatusLabelPt(ev.sessionStatus)}
                                 </span>
                               ) : null}
                             </div>
@@ -771,7 +902,7 @@ export default function AdminCalendarPage() {
                               <Trash2 className="h-3.5 w-3.5" aria-hidden />
                               Excluir
                             </button>
-                            {ev.sessionDbId && ev.sessionStatus !== 'completed' ? (
+                            {ev.sessionDbId && ev.student && ev.sessionStatus !== 'completed' ? (
                               <button
                                 type="button"
                                 disabled={eventActionBusy === ev.id}
@@ -784,6 +915,18 @@ export default function AdminCalendarPage() {
                                   <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
                                 )}
                                 Marcar realizada
+                              </button>
+                            ) : null}
+                            {ev.sessionDbId && ev.student ? (
+                              <button
+                                type="button"
+                                disabled={outcomeSaving || eventActionBusy === ev.id}
+                                onClick={() => openOutcomeModal(ev)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-medium text-rose-900 hover:bg-rose-100 disabled:opacity-50 sm:text-sm"
+                              >
+                                {ev.sessionStatus === 'not_held' || ev.sessionStatus === 'cancelled'
+                                  ? 'Editar falta / cancelamento'
+                                  : 'Não realizada / cancelada'}
                               </button>
                             ) : null}
                             {ev.meetLink && (
@@ -819,6 +962,110 @@ export default function AdminCalendarPage() {
           </section>
         </>
       )}
+
+      {outcomeModal ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 z-0 cursor-default border-0 bg-slate-900/50 p-0"
+            onClick={() => {
+              if (!outcomeSaving) setOutcomeModal(null)
+            }}
+            aria-label="Fechar"
+          />
+          <form
+            onSubmit={submitOutcomeModal}
+            className="relative z-10 w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+          >
+            <h2 className="text-lg font-bold text-slate-900">Registo da sessão (visível ao aluno)</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Use quando a aula <strong>não foi realizada</strong> ou foi <strong>cancelada</strong>. O aluno vê o
+              estado, a atribuição, o motivo e a nota pública (não a nota interna).
+            </p>
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Tipo</span>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={outcomeStatus}
+                  onChange={(e) => setOutcomeStatus(e.target.value)}
+                >
+                  <option value="not_held">Não realizada</option>
+                  <option value="cancelled">Cancelada</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Atribuição</span>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={outcomeAttribution}
+                  onChange={(e) => setOutcomeAttribution(e.target.value)}
+                  required
+                >
+                  <option value="">— Escolher —</option>
+                  {SESSION_ATTRIBUTION_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Motivo</span>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={outcomeReasonCode}
+                  onChange={(e) => setOutcomeReasonCode(e.target.value)}
+                  required
+                >
+                  <option value="">— Escolher —</option>
+                  {SESSION_REASON_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Nota ao aluno (opcional)</span>
+                <textarea
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  rows={2}
+                  value={outcomeReasonNote}
+                  onChange={(e) => setOutcomeReasonNote(e.target.value)}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Nota interna (só mentor)</span>
+                <textarea
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  rows={2}
+                  value={outcomePrivateNote}
+                  onChange={(e) => setOutcomePrivateNote(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={outcomeSaving}
+                onClick={() => setOutcomeModal(null)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800"
+              >
+                Fechar
+              </button>
+              <button
+                type="submit"
+                disabled={outcomeSaving}
+                className="inline-flex items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-800 disabled:opacity-60"
+              >
+                {outcomeSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                Guardar
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {deleteTarget ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">

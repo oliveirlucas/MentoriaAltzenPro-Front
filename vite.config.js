@@ -22,6 +22,7 @@ function cspMetaPlugin(mode, env) {
     mode === 'development' ? scriptSrcDev : scriptSrcProd,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: https: blob:",
+    "media-src 'self' blob: https:",
     // data: + https: — fontes em CDNs (ex.: gstatic) sem listar todos os hosts
     "font-src 'self' data: https: blob:",
     `connect-src ${connectSrc}`,

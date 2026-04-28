@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -6,12 +6,21 @@ import { useToast } from '../context/ToastContext.jsx'
 import { motion, useReducedMotion } from 'framer-motion'
 import Particles from 'react-tsparticles'
 import { loadFull } from 'tsparticles'
-import mentorX from '../assets/mentorX.png'
 
 /**
  * Página principal: login. Logo em `public/logo.png` (ou ajuste `LOGO_SRC`).
  */
 const LOGO_SRC = '/logo.png'
+
+/** URLs alternativas (nome no bucket pode ser com espaço ou com + literal). */
+const LOGIN_BG_VIDEO_URLS = [
+  typeof import.meta.env.VITE_LOGIN_BG_VIDEO_URL === 'string' && import.meta.env.VITE_LOGIN_BG_VIDEO_URL.trim()
+    ? import.meta.env.VITE_LOGIN_BG_VIDEO_URL.trim()
+    : null,
+  'https://portfoliocasamento.s3.us-east-2.amazonaws.com/Video+intro.mp4',
+  `https://portfoliocasamento.s3.us-east-2.amazonaws.com/${encodeURIComponent('Video intro.mp4')}`,
+  'https://portfoliocasamento.s3.us-east-2.amazonaws.com/Video%2Bintro.mp4',
+].filter(Boolean)
 
 export default function Home() {
   const { login } = useAuth()
@@ -24,6 +33,43 @@ export default function Home() {
   const [sp] = useSearchParams()
   const fromParam = sp.get('from') || '/dashboard'
   const reduceMotion = useReducedMotion()
+  const bgVideoRef = useRef(null)
+  const [videoUrlIndex, setVideoUrlIndex] = useState(0)
+  const loginBgVideoSrc = LOGIN_BG_VIDEO_URLS[videoUrlIndex] ?? LOGIN_BG_VIDEO_URLS[0]
+
+  /** Autoplay com vídeo remoto: muted + play() após metadados. Vídeo sempre montado. */
+  useEffect(() => {
+    const el = bgVideoRef.current
+    if (!el) return
+
+    const kickPlay = () => {
+      el.muted = true
+      el.defaultMuted = true
+      el.setAttribute('muted', '')
+      if (!el.paused) return
+      const playAttempt = el.play()
+      if (playAttempt !== undefined) playAttempt.catch(() => {})
+    }
+
+    kickPlay()
+    el.addEventListener('loadeddata', kickPlay)
+    el.addEventListener('canplay', kickPlay)
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible' && el.paused) kickPlay()
+    }
+    document.addEventListener('visibilitychange', onVis)
+
+    return () => {
+      el.removeEventListener('loadeddata', kickPlay)
+      el.removeEventListener('canplay', kickPlay)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [loginBgVideoSrc])
+
+  const onBgVideoError = useCallback(() => {
+    setVideoUrlIndex((i) => (i + 1 < LOGIN_BG_VIDEO_URLS.length ? i + 1 : i))
+  }, [])
 
   const particlesInit = useCallback(async (engine) => {
     await loadFull(engine)
@@ -75,13 +121,30 @@ export default function Home() {
 
   return (
     <div className="relative min-h-screen min-h-dvh overflow-hidden bg-slate-950 font-sans text-slate-100">
-      {/* Fundo animado */}
-      <div className="pointer-events-none absolute inset-0">
+      {/* Vídeo em fixed — CSP precisa de media-src https: (vite.config.js) */}
+      <video
+        ref={bgVideoRef}
+        key={loginBgVideoSrc}
+        className="pointer-events-none fixed inset-0 z-0 h-[100dvh] w-full object-cover object-center"
+        src={loginBgVideoSrc}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="auto"
+        disablePictureInPicture
+        referrerPolicy="no-referrer"
+        aria-hidden
+        onError={onBgVideoError}
+      />
+
+      <div className="pointer-events-none fixed inset-0 z-[1] min-h-[100dvh]">
+        <div className="absolute inset-0 bg-slate-950/30" aria-hidden />
         <div
-          className="absolute inset-0 bg-[radial-gradient(ellipse_110%_70%_at_20%_0%,rgba(34,211,238,0.25),transparent_55%),radial-gradient(ellipse_90%_70%_at_80%_20%,rgba(99,102,241,0.22),transparent_60%),radial-gradient(ellipse_90%_70%_at_60%_90%,rgba(56,189,248,0.18),transparent_60%)]"
+          className="absolute inset-0 bg-[radial-gradient(ellipse_110%_70%_at_20%_0%,rgba(34,211,238,0.22),transparent_55%),radial-gradient(ellipse_90%_70%_at_80%_20%,rgba(99,102,241,0.18),transparent_60%),radial-gradient(ellipse_90%_70%_at_60%_90%,rgba(56,189,248,0.14),transparent_60%)]"
           aria-hidden
         />
-        <div className="absolute inset-0 opacity-60" aria-hidden>
+        <div className="absolute inset-0 opacity-25" aria-hidden>
           <Particles id="loginParticles" init={particlesInit} options={particlesOptions} />
         </div>
         {!reduceMotion && (
@@ -102,8 +165,8 @@ export default function Home() {
         )}
       </div>
 
-      <div className="relative mx-auto flex min-h-screen min-h-dvh w-full max-w-[1400px] flex-col md:flex-row">
-        {/* Coluna esquerda: marca */}
+      <div className="relative z-10 mx-auto flex min-h-screen min-h-dvh w-full max-w-[1400px] flex-col md:flex-row">
+        {/* Coluna esquerda: só logo */}
         <section
           className="flex w-full min-w-0 flex-1 flex-col items-center justify-center px-5 py-10 text-center sm:px-8 md:px-10 md:py-12 lg:px-14
           border-b border-white/10 md:border-b-0 md:border-r md:border-white/10"
@@ -113,7 +176,7 @@ export default function Home() {
             initial={reduceMotion ? false : { opacity: 0, y: 18 }}
             animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
-            className="mx-auto flex w-full max-w-lg flex-col items-center text-center"
+            className="mx-auto flex w-full max-w-lg flex-col items-center justify-center text-center"
           >
             {logoOk ? (
               <img
@@ -130,32 +193,6 @@ export default function Home() {
             ) : (
               <p className="text-3xl font-extrabold tracking-tight text-white">AltzenPro</p>
             )}
-            <p className="mt-5 max-w-md text-pretty text-sm text-cyan-50/75">
-              Mentoria com foco no que importa: diagnóstico, plano 90d, agenda e recursos — tudo no mesmo portal.
-            </p>
-
-            <motion.div
-              initial={reduceMotion ? false : { opacity: 0, y: 10, scale: 0.98 }}
-              animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.7, delay: 0.12, ease: 'easeOut' }}
-              className="relative mt-8 w-full max-w-[22rem]"
-            >
-              <div
-                className="absolute -inset-2 rounded-3xl bg-gradient-to-br from-cyan-400/30 to-indigo-500/20 blur-2xl"
-                aria-hidden
-              />
-              <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-4 shadow-2xl shadow-black/40">
-                <img
-                  src={mentorX}
-                  alt="Mentor X"
-                  className="mx-auto h-auto w-full max-w-[18rem] object-contain"
-                  decoding="async"
-                />
-                <p className="mt-3 text-xs text-cyan-50/70">
-                  O Mentor X cruza teus dados do portal pra te responder rápido, sem enrolação.
-                </p>
-              </div>
-            </motion.div>
           </motion.div>
         </section>
 
@@ -172,16 +209,13 @@ export default function Home() {
               className="mb-6 text-center"
             >
               <h2 className="text-lg font-semibold text-white sm:text-xl">Portal de mentoria</h2>
-              <p className="mx-auto mt-2 max-w-md text-pretty text-sm text-cyan-50/70">
-                Acesse seu painel, diagnóstico, plano de 90 dias e recursos.
-              </p>
             </motion.div>
 
             <motion.div
               initial={reduceMotion ? false : { opacity: 0, y: 16 }}
               animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
               transition={{ duration: 0.65, delay: 0.05, ease: 'easeOut' }}
-              className="rounded-2xl border border-white/10 bg-white/5 p-6 text-left shadow-2xl shadow-black/35 backdrop-blur sm:p-8"
+              className="rounded-2xl border border-white/[0.035] bg-white/[0.012] p-6 text-left shadow-2xl shadow-black/35 backdrop-blur sm:p-8"
             >
               <form onSubmit={submit} className="space-y-4 text-left">
                 <div>
@@ -191,7 +225,7 @@ export default function Home() {
                   <input
                     id="home-email"
                     type="email"
-                    className="mt-1 w-full min-h-[44px] rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2.5 text-base text-white shadow-sm placeholder:text-slate-400 focus:border-cyan-400/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40 sm:text-sm"
+                    className="mt-1 w-full min-h-[44px] rounded-lg border border-white/[0.035] bg-slate-950/[0.06] px-3 py-2.5 text-base text-white shadow-sm placeholder:text-slate-400 focus:border-cyan-400/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40 sm:text-sm"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
@@ -205,7 +239,7 @@ export default function Home() {
                   <input
                     id="home-password"
                     type="password"
-                    className="mt-1 w-full min-h-[44px] rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2.5 text-base text-white shadow-sm placeholder:text-slate-400 focus:border-cyan-400/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40 sm:text-sm"
+                    className="mt-1 w-full min-h-[44px] rounded-lg border border-white/[0.035] bg-slate-950/[0.06] px-3 py-2.5 text-base text-white shadow-sm placeholder:text-slate-400 focus:border-cyan-400/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40 sm:text-sm"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required

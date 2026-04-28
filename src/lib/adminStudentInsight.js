@@ -31,6 +31,8 @@ const PROFILE_MAP = {
   B: 'Júnior consolidando base',
   C: 'Pleno → senioridade',
   D: 'Outro',
+  E: 'Estagiário, iniciando a carreira',
+  F: 'Ainda pensando em entrar pra área',
 }
 
 function sumScoredObject(obj) {
@@ -46,13 +48,22 @@ export function getDiagnosticoSummary(payload) {
   const tech = sumScoredObject(payload.techScores)
   const career = sumScoredObject(payload.careerScores)
   const p = payload.profile
+  const other = typeof payload.profileOther === 'string' ? payload.profileOther.trim() : ''
+  const profileLine =
+    p && PROFILE_MAP[p]
+      ? p === 'D' && other
+        ? `Perfil D: outro — ${other}`
+        : `Perfil ${p}: ${PROFILE_MAP[p]}`
+      : p
+        ? `Perfil ${p}`
+        : '—'
   return {
     tech,
     career,
-    techMax: 90,
-    careerMax: 60,
+    techMax: 140,
+    careerMax: 100,
     profileCode: p || '—',
-    profileLabel: p && PROFILE_MAP[p] ? `Perfil ${p}: ${PROFILE_MAP[p]}` : p ? `Perfil ${p}` : '—',
+    profileLabel: profileLine,
     goals: Array.isArray(payload.goals) ? payload.goals : [],
   }
 }

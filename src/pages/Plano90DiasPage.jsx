@@ -5,7 +5,6 @@ import {
   BookOpen,
   Target,
   Table2,
-  ListChecks,
   BarChart3,
   Printer,
   Info,
@@ -27,8 +26,6 @@ const defaultMainGoal = {
   objective: '',
   reason: '',
   measurable: '',
-  startDate: '',
-  endDate: '',
 };
 
 function emptyWeekRow() {
@@ -38,6 +35,7 @@ function emptyWeekRow() {
     careerFocus: '',
     entregas: '',
     evidence: '',
+    checklist: { ...defaultChecklist },
   };
 }
 
@@ -186,6 +184,17 @@ const WEEK_GUIDE = [
   },
 ];
 
+function normalizeWeekChecklist(obj) {
+  const c = { ...defaultChecklist, ...(obj && typeof obj === 'object' ? obj : {}) };
+  return {
+    weekGoal: !!c.weekGoal,
+    timeBlocks: !!c.timeBlocks,
+    techEvidence: !!c.techEvidence,
+    sharedEvidence: !!c.sharedEvidence,
+    reviewedNext: !!c.reviewedNext,
+  };
+}
+
 function padWeeks(arr) {
   const rows = Array.isArray(arr) ? [...arr] : [];
   while (rows.length < 12) rows.push(emptyWeekRow());
@@ -195,7 +204,16 @@ function padWeeks(arr) {
     careerFocus: r?.careerFocus != null ? String(r.careerFocus) : '',
     entregas: r?.entregas != null ? String(r.entregas) : '',
     evidence: r?.evidence != null ? String(r.evidence) : '',
+    checklist: normalizeWeekChecklist(r?.checklist),
   }));
+}
+
+function applyLegacyTopLevelChecklist(weeks, raw) {
+  const hasAnyEmbedded = Array.isArray(raw?.weeks) && raw.weeks.some((w) => w && w.checklist && typeof w.checklist === 'object');
+  if (hasAnyEmbedded) return weeks;
+  if (!raw?.checklist || typeof raw.checklist !== 'object') return weeks;
+  const leg = normalizeWeekChecklist(raw.checklist);
+  return weeks.map((w, i) => (i === 0 ? { ...w, checklist: leg } : w));
 }
 
 function padDeliveryRow(arr) {
@@ -217,19 +235,14 @@ function mergePlano(raw) {
       entregas: padDeliveryRow(inc.entregas),
     };
   });
-  const c = { ...defaultChecklist, ...(raw.checklist && typeof raw.checklist === 'object' ? raw.checklist : {}) };
+  const rawMg = raw.mainGoal && typeof raw.mainGoal === 'object' ? raw.mainGoal : {}
+  const { startDate: _sd, endDate: _ed, ...mainGoalRest } = { ...defaultMainGoal, ...rawMg }
+  const weeks = applyLegacyTopLevelChecklist(padWeeks(raw.weeks), raw);
   return {
     capa: { ...defaultCapa, ...(raw.capa && typeof raw.capa === 'object' ? raw.capa : {}) },
-    mainGoal: { ...defaultMainGoal, ...(raw.mainGoal && typeof raw.mainGoal === 'object' ? raw.mainGoal : {}) },
+    mainGoal: { ...defaultMainGoal, ...mainGoalRest },
     months,
-    weeks: padWeeks(raw.weeks),
-    checklist: {
-      weekGoal: !!c.weekGoal,
-      timeBlocks: !!c.timeBlocks,
-      techEvidence: !!c.techEvidence,
-      sharedEvidence: !!c.sharedEvidence,
-      reviewedNext: !!c.reviewedNext,
-    },
+    weeks,
     finalReview: {
       tech: padDeliveryRow(raw.finalReview?.tech),
       career: padDeliveryRow(raw.finalReview?.career),
@@ -279,13 +292,12 @@ export default function Plano90DiasPage() {
   const [mainGoal, setMainGoal] = useState({ ...defaultMainGoal });
   const [months, setMonths] = useState(() => defaultMonths());
   const [weeks, setWeeks] = useState(() => Array.from({ length: 12 }, () => emptyWeekRow()));
-  const [checklist, setChecklist] = useState({ ...defaultChecklist });
   const [finalReview, setFinalReview] = useState({ ...defaultFinal });
   const [hydrated, setHydrated] = useState(false);
 
   const buildPayload = useCallback(
-    () => ({ version: 1, capa, mainGoal, months, weeks, checklist, finalReview }),
-    [capa, mainGoal, months, weeks, checklist, finalReview]
+    () => ({ version: 1, capa, mainGoal, months, weeks, finalReview }),
+    [capa, mainGoal, months, weeks, finalReview]
   );
   const snapshot = useMemo(() => JSON.stringify(buildPayload()), [buildPayload]);
   useFormAutosave(FORM_TYPE, targetFormUserId, hydrated, snapshot, 1500, {
@@ -320,7 +332,6 @@ export default function Plano90DiasPage() {
     setMainGoal(data.mainGoal);
     setMonths(data.months);
     setWeeks(data.weeks);
-    setChecklist(data.checklist);
     setFinalReview(data.finalReview);
   };
 
@@ -442,7 +453,19 @@ export default function Plano90DiasPage() {
   const setWeekField = (index, key, value) => {
     setWeeks((prev) => {
       const n = [...prev];
-      n[index] = { ...n[index], [key]: value };
+      const row = { ...n[index] };
+      row[key] = value;
+      n[index] = row;
+      return n;
+    });
+  };
+
+  const setWeekChecklist = (index, key, checked) => {
+    setWeeks((prev) => {
+      const n = [...prev];
+      const row = { ...n[index] };
+      row.checklist = normalizeWeekChecklist({ ...row.checklist, [key]: checked });
+      n[index] = row;
       return n;
     });
   };
@@ -578,7 +601,7 @@ export default function Plano90DiasPage() {
             <ul className="list-disc space-y-1 pl-5 text-slate-700 print:text-sm">
               <li>Defina 1 objetivo principal para 90 dias.</li>
               <li>Divida em 3 ciclos de 30 dias.</li>
-              <li>Execute com revisão semanal.</li>
+              <li>Execute com revisão semanal e marque, ao fim de cada semana, os rituais na tabela (coluna específica daquela semana).</li>
               <li>Registre evidências concretas.</li>
             </ul>
           </Section>
@@ -589,8 +612,6 @@ export default function Plano90DiasPage() {
                 ['objective', 'Objetivo'],
                 ['reason', 'Motivo'],
                 ['measurable', 'Meta mensurável'],
-                ['startDate', 'Data de início'],
-                ['endDate', 'Data final'],
               ].map(([k, label]) => (
                 <div key={k} className={k === 'reason' || k === 'objective' ? 'md:col-span-2' : ''}>
                   <label className="mb-1 block text-sm font-medium capitalize text-slate-600">{label}</label>
@@ -654,6 +675,10 @@ export default function Plano90DiasPage() {
           </Section>
 
           <Section icon={Table2} title="4) Tabela semanal (12 semanas)">
+            <p className="mb-3 text-sm text-slate-600 print:text-xs">
+              Ao <strong>final de cada semana</strong>, use a última coluna para marcar o que você cumpriu naquela semana
+              (não é global).
+            </p>
             <div className="mb-4 rounded-lg border border-amber-100 bg-amber-50 p-4 text-sm text-amber-950 print:block">
               <p className="font-semibold">Referência — mentoria 90 dias (fases)</p>
               <p className="mt-1 text-amber-900/90">
@@ -663,7 +688,7 @@ export default function Plano90DiasPage() {
             </div>
             <div className="hidden print:block print:break-before-page" />
             <div className="overflow-x-auto print:overflow-visible">
-              <table className="w-full min-w-[800px] border-collapse border border-slate-200 text-left text-sm">
+              <table className="w-full min-w-[68rem] border-collapse border border-slate-200 text-left text-sm">
                 <thead>
                   <tr className="bg-slate-100 text-slate-800">
                     <th className="border border-slate-200 p-2 print:p-1">Semana</th>
@@ -672,6 +697,9 @@ export default function Plano90DiasPage() {
                     <th className="border border-slate-200 p-2 print:p-1">Foco carreira / visibilidade</th>
                     <th className="border border-slate-200 p-2 print:p-1">Entregas</th>
                     <th className="border border-slate-200 p-2 print:p-1">Evidências</th>
+                    <th className="w-[12rem] border border-slate-200 p-2 print:w-auto print:p-1 print:text-[0.65rem]">
+                      Rituais desta semana
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -689,6 +717,21 @@ export default function Plano90DiasPage() {
                           />
                         </td>
                       ))}
+                      <td className="border border-slate-200 p-1.5 align-top print:p-1">
+                        <ul className="m-0 list-none space-y-1.5 p-0">
+                          {checklistLabels.map((item) => (
+                            <li key={item.key} className="flex items-start gap-1.5">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300 print:h-3 print:w-3"
+                                checked={!!w.checklist?.[item.key]}
+                                onChange={(e) => setWeekChecklist(i, item.key, e.target.checked)}
+                              />
+                              <span className="text-[0.7rem] leading-tight text-slate-700 print:text-[0.6rem]">{item.text}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -724,24 +767,26 @@ export default function Plano90DiasPage() {
             </p>
           </div>
 
-          <Section icon={ListChecks} title="5) Checklist de execução semanal (marque)">
-            <ul className="space-y-2">
-              {checklistLabels.map((item) => (
-                <li key={item.key} className="flex items-start gap-2 print:text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-1 h-4 w-4 rounded border-slate-300"
-                    checked={!!checklist[item.key]}
-                    onChange={(e) => setChecklist((c) => ({ ...c, [item.key]: e.target.checked }))}
-                  />
-                  <span>{item.text}</span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-
-          <Section title="6) Adaptação por perfil" icon={Info}>
+          <Section title="5) Adaptação por perfil" icon={Info}>
             <div className="space-y-6 text-sm text-slate-700 print:text-xs">
+              <div>
+                <h3 className="font-bold text-indigo-900">Estagiário ou começando a carreira</h3>
+                <ul className="mt-1 list-disc pl-5">
+                  <li>Priorize rotina, ambiente e uma base sólida (lógica, Git, leitura de código) em vez de muitos temas ao mesmo tempo.</li>
+                  <li>Escolha um projeto pequeno, mas do início ao fim, com entregas que você consiga comprovar.</li>
+                  <li>Alinhe com o mentor (ou a empresa) expectativas de carga, prazos e o que “entregar com qualidade” significa no seu contexto.</li>
+                  <li>Visibilidade: portfólio simples (README, demonstração) e presença mínima coerente (ex.: 1 atualização quinzenal no que for relevante para você).</li>
+                </ul>
+              </div>
+              <div>
+                <h3 className="font-bold text-indigo-900">Transição de carreira</h3>
+                <ul className="mt-1 list-disc pl-5">
+                  <li>Deixe explícito o que vem de experiência anterior (comunicação, domínio de processo) e o que ainda precisa virar prática em tech.</li>
+                  <li>Reduza o escopo do projeto: melhor dominar 1–2 assuntos e 1 narrativa de mudança do que espalhar em muitas frentes.</li>
+                  <li>Inclua na semana blocos fixos de estudo e de “mão na massa”; transição exige constância, não só intenção.</li>
+                  <li>Visibilidade: alinhe LinkedIn, CV e narrativa com a vaga ou caminho que você busca; evidências concretas valem mais que lista longa de cursos.</li>
+                </ul>
+              </div>
               <div>
                 <h3 className="font-bold text-indigo-900">Suporte/QA → Dev</h3>
                 <ul className="mt-1 list-disc pl-5">
@@ -769,7 +814,7 @@ export default function Plano90DiasPage() {
             </div>
           </Section>
 
-          <Section icon={BarChart3} title="7) Revisão final (Dia 90)">
+          <Section icon={BarChart3} title="6) Revisão final (Dia 90)">
             <div className="space-y-6">
               {[
                 { key: 'tech', label: '3 conquistas técnicas', arr: finalReview.tech, setter: (a) => setFinalReview((f) => ({ ...f, tech: a })) },

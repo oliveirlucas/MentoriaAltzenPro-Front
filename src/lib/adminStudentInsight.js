@@ -88,9 +88,60 @@ export function getPlanoSummary(payload) {
   }
 }
 
-function atMidnight(d) {
-  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+/** Fuso usado para “hoje” no ritmo do programa (portal Brasil). */
+const PROGRAM_DAY_TIMEZONE = 'America/Sao_Paulo'
+
+/**
+ * Postgres `DATE` costuma serializar como `YYYY-MM-DDT00:00:00.000Z`. Usar
+ * `getDate()` no fuso local empurra o dia civil para trás em BRT e gera “Dia 2”
+ * no primeiro dia esperado. Extraímos YYYY-MM-DD do início da string quando existir.
+ * @returns {{ y: number, mo: number, d: number } | null}
+ */
+function parseEnrollmentDateParts(startedAt) {
+  if (startedAt == null || String(startedAt).trim() === '') return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(startedAt).trim())
+  if (m) {
+    const y = Number(m[1])
+    const mo = Number(m[2])
+    const d = Number(m[3])
+    if (!Number.isFinite(y) || mo < 1 || mo > 12 || d < 1 || d > 31) return null
+    return { y, mo, d }
+  }
+  const t = new Date(startedAt)
+  if (Number.isNaN(t.getTime())) return null
+  return { y: t.getUTCFullYear(), mo: t.getUTCMonth() + 1, d: t.getUTCDate() }
+}
+
+/**
+ * Dia civil no fuso do programa (para “hoje” e para timestamps como fecho).
+ * @returns {{ y: number, mo: number, d: number } | null}
+ */
+function getCivilDatePartsInTimezone(date, timeZone) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = fmt.formatToParts(date)
+  const y = Number(parts.find((p) => p.type === 'year')?.value)
+  const mo = Number(parts.find((p) => p.type === 'month')?.value)
+  const d = Number(parts.find((p) => p.type === 'day')?.value)
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null
+  return { y, mo, d }
+}
+
+function compareCivil(a, b) {
+  if (a.y !== b.y) return a.y - b.y
+  if (a.mo !== b.mo) return a.mo - b.mo
+  return a.d - b.d
+}
+
+function civilDiffDays(start, end) {
+  const t0 = Date.UTC(start.y, start.mo - 1, start.d)
+  const t1 = Date.UTC(end.y, end.mo - 1, end.d)
+  return Math.round((t1 - t0) / 864e5)
 }
 
 /**
@@ -100,31 +151,25 @@ function atMidnight(d) {
  * @param {Date} [now]
  */
 export function getDayInProgram(startedAt, now = new Date()) {
-  if (startedAt == null || String(startedAt).trim() === '') return null
-  const t0 = new Date(startedAt)
-  if (Number.isNaN(t0.getTime())) return null
-  const a = atMidnight(t0)
-  const b = atMidnight(now)
-  if (!a || !b) return null
-  const diff = Math.floor((b - a) / 864e5) + 1
+  const start = parseEnrollmentDateParts(startedAt)
+  const ref = getCivilDatePartsInTimezone(now, PROGRAM_DAY_TIMEZONE)
+  if (!start || !ref) return null
+  const diff = civilDiffDays(start, ref) + 1
   if (diff < 1) return null
   if (diff > 90) return 90
   return diff
 }
 
 /**
- * Verdadeiro quando a data de início (calendário local) é estritamente posterior a `now`.
+ * Verdadeiro quando a data de início (calendário do programa em America/Sao_Paulo) é estritamente posterior a `now`.
  * @param {string|null|undefined} startedAt
  * @param {Date} [now]
  */
 export function isProgramStartDateInFuture(startedAt, now = new Date()) {
-  if (startedAt == null || String(startedAt).trim() === '') return false
-  const t0 = new Date(startedAt)
-  if (Number.isNaN(t0.getTime())) return false
-  const a = atMidnight(t0)
-  const b = atMidnight(now)
-  if (!a || !b) return false
-  return b < a
+  const start = parseEnrollmentDateParts(startedAt)
+  const today = getCivilDatePartsInTimezone(now, PROGRAM_DAY_TIMEZONE)
+  if (!start || !today) return false
+  return compareCivil(today, start) < 0
 }
 
 /**

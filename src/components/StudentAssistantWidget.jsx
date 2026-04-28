@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { X, Send, Loader2, Sparkles, Terminal } from 'lucide-react'
@@ -12,6 +13,12 @@ function buildMentorXWelcome(firstName) {
   const n = firstName && String(firstName).trim() ? firstName.trim() : 'aluno'
   return `E aí, **${n}**, **Mentor X** na área. Sou conhecido por ter acesso exclusivo aos corredores da AltzenPro. Manda sua pergunta ai que eu tento te devolver na mão. Se eu não tiver a informação, já dou o papo reto. *Agora namoral, se quer saber detalhe demais melhor perguntar o teu mentor de carne e osso.*
         o que cê precisa desenrolar aí?`
+}
+
+function buildMentorXAdminWelcome(adminFirstName, studentLabel) {
+  const a = adminFirstName && String(adminFirstName).trim() ? adminFirstName.trim() : 'mentor'
+  const s = studentLabel && String(studentLabel).trim() ? String(studentLabel).trim() : 'esse aluno'
+  return `Fechou, **${a}**. Tô em **modo mentor/admin** olhando o contexto do aluno: **${s}**.\n\nManda aí o que tu quer destrinchar (diagnóstico, plano 90d, ciclo, notas, agenda, contratos) que eu te devolvo um resumo e próximos passos.`
 }
 
 /**
@@ -106,31 +113,46 @@ function getMarkdownComponents(darkBubble) {
 }
 
 /**
- * @param {{ firstName?: string }} props
+ * @param {{ firstName?: string, adminStudentId?: number | null, adminStudentLabel?: string | null }} props
  */
-export default function StudentAssistantWidget({ firstName: firstNameProp = 'aluno' }) {
+export default function StudentAssistantWidget({
+  firstName: firstNameProp = 'aluno',
+  adminStudentId: adminStudentIdProp = null,
+  adminStudentLabel: adminStudentLabelProp = null,
+}) {
   const firstName = (firstNameProp && String(firstNameProp).trim()) || 'aluno'
+  const adminStudentId = adminStudentIdProp != null ? Number(adminStudentIdProp) : null
+  const isAdminMode = Number.isInteger(adminStudentId) && adminStudentId > 0
+  const adminStudentLabel = adminStudentLabelProp != null ? String(adminStudentLabelProp) : ''
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [messages, setMessages] = useState(() => [])
   const [headerImgError, setHeaderImgError] = useState(false)
-  const bottomRef = useRef(null)
+  const scrollRef = useRef(null)
   const inputRef = useRef(null)
   const mdUser = useMemo(() => getMarkdownComponents(false), [])
   const mdMentor = useMemo(() => getMarkdownComponents(true), [])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollRef.current
+    if (!el) return
+    // Evita "puxar" a página (scrollIntoView pode mexer no viewport em páginas longas).
+    el.scrollTop = el.scrollHeight
   }, [messages, open])
 
   useEffect(() => {
     if (!open) return
     setMessages((m) => {
       if (m.length > 0) return m
-      return [{ role: 'assistant', content: buildMentorXWelcome(firstName) }]
+      return [
+        {
+          role: 'assistant',
+          content: isAdminMode ? buildMentorXAdminWelcome(firstName, adminStudentLabel) : buildMentorXWelcome(firstName),
+        },
+      ]
     })
-  }, [open, firstName])
+  }, [open, firstName, isAdminMode, adminStudentLabel])
 
   useEffect(() => {
     if (!open) return
@@ -149,9 +171,11 @@ export default function StudentAssistantWidget({ firstName: firstNameProp = 'alu
     setMessages((m) => [...m, { role: 'user', content: text }])
     setLoading(true)
     try {
-      const data = await api('/me/assistant', {
+      const path = isAdminMode ? '/admin/assistant' : '/me/assistant'
+      const payload = isAdminMode ? { student_id: adminStudentId, message: text, history } : { message: text, history }
+      const data = await api(path, {
         method: 'POST',
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify(payload),
       })
       const reply = typeof data.reply === 'string' ? data.reply : 'Nada voltou do servidor, estranho.'
       setMessages((m) => [...m, { role: 'assistant', content: reply }])
@@ -166,9 +190,9 @@ export default function StudentAssistantWidget({ firstName: firstNameProp = 'alu
     } finally {
       setLoading(false)
     }
-  }, [input, loading, messages])
+  }, [input, loading, messages, isAdminMode, adminStudentId])
 
-  return (
+  const ui = (
     <>
       <button
         type="button"
@@ -182,7 +206,7 @@ export default function StudentAssistantWidget({ firstName: firstNameProp = 'alu
 
       {open && (
         <div
-          className="fixed bottom-24 right-4 z-50 flex h-[min(600px,78vh)] w-[min(100vw-1.5rem,480px)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-cyan-500/25 bg-slate-950 shadow-2xl shadow-cyan-500/10 sm:right-5 print:hidden"
+          className="fixed bottom-24 right-4 z-[60] flex h-[min(600px,78vh)] w-[min(100vw-1.5rem,480px)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-cyan-500/25 bg-slate-950 shadow-2xl shadow-cyan-500/10 sm:right-5 print:hidden"
           role="dialog"
           aria-label="Mentor X, chat que cruza teus dados do portal na AltzenPro"
         >
@@ -235,7 +259,7 @@ export default function StudentAssistantWidget({ firstName: firstNameProp = 'alu
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-100/95 px-3 py-3">
+          <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-100/95 px-3 py-3">
             {messages.map((msg, i) => {
               const isUser = msg.role === 'user'
               const isAssistant = msg.role === 'assistant'
@@ -267,7 +291,7 @@ export default function StudentAssistantWidget({ firstName: firstNameProp = 'alu
                 <span className="text-slate-600">Calma, tô pensando, as vezes o TDAH bate forte…</span>
               </div>
             )}
-            <div ref={bottomRef} />
+            <div />
           </div>
 
           <div className="border-t border-slate-800/50 bg-slate-900 p-2.5">
@@ -305,4 +329,9 @@ export default function StudentAssistantWidget({ firstName: firstNameProp = 'alu
       )}
     </>
   )
+
+  if (typeof document !== 'undefined') {
+    return createPortal(ui, document.body)
+  }
+  return ui
 }

@@ -57,6 +57,7 @@ import {
 } from '../lib/calendarSessionLabels.js'
 import { normalizeTipTapBody, stripHtmlToPlain } from '../lib/noteHtml.js'
 import MentorNoteRichTextEditor from '../components/MentorNoteRichTextEditor.jsx'
+import StudentAssistantWidget from '../components/StudentAssistantWidget.jsx'
 
 const NOTE_ANEXOS_MAX = 8
 
@@ -2202,6 +2203,12 @@ export default function AdminStudentDetail() {
           </div>
         </div>
       )}
+
+      <StudentAssistantWidget
+        firstName={profile?.full_name ? String(profile.full_name).split(/\s+/)[0] : 'mentor'}
+        adminStudentId={Number(id)}
+        adminStudentLabel={data?.student?.full_name ? String(data.student.full_name) : `Aluno #${id}`}
+      />
     </div>
   )
 }

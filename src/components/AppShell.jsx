@@ -8,6 +8,7 @@ import {
   CalendarDays,
   User,
   BookOpen,
+  ScrollText,
   LogOut,
   Shield,
   Menu,
@@ -93,6 +94,7 @@ export default function AppShell({ children }) {
     }
     list.push(
       { to: '/recursos', label: 'Recursos', icon: BookOpen, end: false, admin: false },
+      { to: '/anotacoes', label: 'Anotações', icon: ScrollText, end: false, admin: false },
       { to: '/perfil', label: 'Perfil', icon: User, end: false, admin: false },
     )
     return list

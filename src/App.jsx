@@ -12,6 +12,7 @@ import AdminStudentInternalNotesPage from './pages/AdminStudentInternalNotesPage
 import AdminCalendarPage from './pages/AdminCalendarPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
 import ResourcesPage from './pages/ResourcesPage.jsx'
+import StudentSelfNotesPage from './pages/StudentSelfNotesPage.jsx'
 
 /** /login continua a funcionar (links antigos) e repassa ?from= para a home. */
 function LoginLegacyRedirect() {
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/perfil" element={<ProfilePage />} />
             <Route path="/recursos" element={<ResourcesPage />} />
+            <Route path="/anotacoes" element={<StudentSelfNotesPage />} />
             <Route path="/diagnostico" element={<DiagnosticoPage />} />
             <Route path="/plano-90-dias" element={<Plano90DiasPage />} />
             <Route path="/admin" element={<AdminDashboard />} />

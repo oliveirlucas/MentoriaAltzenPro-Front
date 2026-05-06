@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { Link, Navigate, useParams, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -76,6 +76,48 @@ const defaultFinal = {
   career: ['', '', ''],
   next90: ['', '', ''],
 };
+
+/** Textarea que acompanha o texto na tabela semanal (sem h-full em td; altura recalculada após carregar dados / F5). */
+function WeeklyCellTextarea({ value, onChange, className = '', ...rest }) {
+  const ref = useRef(null)
+  const MIN_PX = 64 // 4rem — altura mínima por célula
+
+  const syncHeight = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = '0px'
+    el.style.height = `${Math.max(MIN_PX, el.scrollHeight)}px`
+  }, [])
+
+  useLayoutEffect(() => {
+    syncHeight()
+    const el = ref.current
+    const td = el?.closest('td')
+    if (!td || typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(() => {
+      syncHeight()
+    })
+    ro.observe(td)
+    return () => ro.disconnect()
+  }, [value, syncHeight])
+
+  useEffect(() => {
+    const onWinResize = () => syncHeight()
+    window.addEventListener('resize', onWinResize)
+    return () => window.removeEventListener('resize', onWinResize)
+  }, [syncHeight])
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={onChange}
+      className={className}
+      {...rest}
+    />
+  )
+}
 
 const checklistLabels = [
   { key: 'weekGoal', text: 'Defini meu objetivo da semana.' },
@@ -709,9 +751,9 @@ export default function Plano90DiasPage() {
                         {i + 1}
                       </td>
                       {['weekObjective', 'techFocus', 'careerFocus', 'entregas', 'evidence'].map((key) => (
-                        <td key={key} className="border border-slate-200 p-0">
-                          <textarea
-                            className="h-full w-full min-h-[4rem] resize-y border-0 bg-transparent p-2 text-sm outline-none print:min-h-[3rem] print:py-1"
+                        <td key={key} className="border border-slate-200 p-0 align-top">
+                          <WeeklyCellTextarea
+                            className="box-border block w-full min-h-[4rem] resize-none overflow-hidden border-0 bg-transparent p-2 text-sm leading-snug outline-none print:min-h-[3rem] print:py-1"
                             value={w[key]}
                             onChange={(e) => setWeekField(i, key, e.target.value)}
                           />

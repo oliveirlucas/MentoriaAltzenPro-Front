@@ -1,6 +1,10 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /** CSP no HTML: endurece XSS; `connect-src` inclui API (VITE_API_URL) e ViaCEP. */
 function cspMetaPlugin(mode, env) {
@@ -60,6 +64,11 @@ const staticSecurityHeaders = {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
     plugins: [react(), tailwindcss(), cspMetaPlugin(mode, env)],
     server: {
       headers: staticSecurityHeaders,

@@ -212,11 +212,14 @@ export function computeMentorHealth({
   form_snapshots,
   now = new Date(),
   portal,
+  calendarSoftensPlanSilence = false,
 }: {
   enrollment: EnrollmentLike | null | undefined
   form_snapshots: Array<{ form_type: string; updated_at: string | null }>
   now?: Date
   portal?: { portal_diagnostico_enabled?: boolean; portal_plano_90_enabled?: boolean }
+  /** Próxima aula + cancelamento acordado ou aula recente — não alertar só por falta de save no plano. */
+  calendarSoftensPlanSilence?: boolean
 }): {
   day: number | null
   week: number | null
@@ -271,21 +274,23 @@ export function computeMentorHealth({
         level: 'high',
         text: 'Plano 90 dias ainda sem registro com o programa em curso (início +2 dias ou mais).',
       })
-    } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 14 && day && day > 1) {
-      messages.push({
-        level: 'high',
-        text: `Plano sem atualização há cerca de ${daysSincePlano} dia(s) — risco de atraso de execução (aulas/ritmo).`,
-      })
-    } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 7) {
-      messages.push({
-        level: 'medium',
-        text: `Cerca de ${daysSincePlano} dia(s) sem novo salvamento do plano no portal.`,
-      })
-    } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 3) {
-      messages.push({
-        level: 'low',
-        text: 'Alguns dias sem registro do plano — acompanhe na mentoria de rotina.',
-      })
+    } else if (!calendarSoftensPlanSilence) {
+      if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 14 && day && day > 1) {
+        messages.push({
+          level: 'high',
+          text: `Plano sem atualização há cerca de ${daysSincePlano} dia(s) — risco de atraso de execução (aulas/ritmo).`,
+        })
+      } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 7) {
+        messages.push({
+          level: 'medium',
+          text: `Cerca de ${daysSincePlano} dia(s) sem novo salvamento do plano no portal.`,
+        })
+      } else if (usePlano && state === 'ativa' && planU && (daysSincePlano ?? 0) > 3) {
+        messages.push({
+          level: 'low',
+          text: 'Alguns dias sem registro do plano — acompanhe na mentoria de rotina.',
+        })
+      }
     }
   }
   if (useDiag && (state === 'ativa' || state === 'agendada') && !diaU && !notYetStarted) {
@@ -336,6 +341,224 @@ export type AdminStudentListRow = Record<string, unknown> & {
   portal_diagnostico_enabled?: boolean
   portal_plano_90_enabled?: boolean
   last_form_activity?: string | null
+  cal_next_scheduled_starts_at?: string | null
+  cal_last_completed_starts_at?: string | null
+  cal_last_cancelled_starts_at?: string | null
+  cal_last_cancelled_attribution?: string | null
+  cal_last_cancelled_reason?: string | null
+}
+
+export type AdminAttentionBand = 'ok' | 'info' | 'watch' | 'late' | 'critical'
+
+/** Mesmas classes visuais da coluna «Prioridade» na lista admin. */
+export function adminAttentionBandSurfaceClass(band: AdminAttentionBand): string {
+  switch (band) {
+    case 'critical':
+      return 'border-rose-300 bg-rose-50 text-rose-950'
+    case 'late':
+      return 'border-orange-300 bg-orange-50 text-orange-950'
+    case 'watch':
+      return 'border-amber-300 bg-amber-50 text-amber-950'
+    case 'info':
+      return 'border-sky-300 bg-sky-50 text-sky-950'
+    default:
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900'
+  }
+}
+
+export type StudentDetailAttentionSource = {
+  student?: Record<string, unknown> & {
+    id?: number
+    portal_diagnostico_enabled?: boolean
+    portal_plano_90_enabled?: boolean
+  }
+  enrollments?: Array<
+    EnrollmentLike & {
+      id?: number
+    }
+  >
+  form_snapshots?: Array<{ form_type?: string; updated_at?: string | null }>
+  calendar_sessions?: Array<{
+    session_status?: string | null
+    starts_at?: string | null
+    session_attribution?: string | null
+    session_reason_code?: string | null
+  }>
+}
+
+/** Replica os campos `cal_*` do GET `/admin/students` a partir das sessões na ficha. */
+export function aggregateCalendarFieldsFromSessions(
+  sessions: StudentDetailAttentionSource['calendar_sessions'] | null | undefined,
+  now = new Date()
+): Pick<
+  AdminStudentListRow,
+  | 'cal_next_scheduled_starts_at'
+  | 'cal_last_completed_starts_at'
+  | 'cal_last_cancelled_starts_at'
+  | 'cal_last_cancelled_attribution'
+  | 'cal_last_cancelled_reason'
+> {
+  const empty: Pick<
+    AdminStudentListRow,
+    | 'cal_next_scheduled_starts_at'
+    | 'cal_last_completed_starts_at'
+    | 'cal_last_cancelled_starts_at'
+    | 'cal_last_cancelled_attribution'
+    | 'cal_last_cancelled_reason'
+  > = {}
+  if (!sessions?.length) return empty
+  const nowMs = now.getTime()
+
+  let nextMin = Infinity
+  let calNext: string | undefined
+  for (const s of sessions) {
+    if (s.session_status !== 'scheduled' || s.starts_at == null || String(s.starts_at).trim() === '') continue
+    const t = new Date(String(s.starts_at)).getTime()
+    if (Number.isNaN(t) || t < nowMs) continue
+    if (t < nextMin) {
+      nextMin = t
+      calNext = String(s.starts_at)
+    }
+  }
+
+  let completedMax = -Infinity
+  let calCompleted: string | undefined
+  for (const s of sessions) {
+    if (s.session_status !== 'completed' || s.starts_at == null || String(s.starts_at).trim() === '') continue
+    const t = new Date(String(s.starts_at)).getTime()
+    if (Number.isNaN(t)) continue
+    if (t > completedMax) {
+      completedMax = t
+      calCompleted = String(s.starts_at)
+    }
+  }
+
+  const cancelled = sessions.filter(
+    (s) => s.session_status === 'cancelled' && s.starts_at != null && String(s.starts_at).trim() !== ''
+  )
+  cancelled.sort(
+    (a, b) => new Date(String(b.starts_at)).getTime() - new Date(String(a.starts_at)).getTime()
+  )
+  const lastCan = cancelled[0]
+
+  return {
+    ...(calNext !== undefined ? { cal_next_scheduled_starts_at: calNext } : {}),
+    ...(calCompleted !== undefined ? { cal_last_completed_starts_at: calCompleted } : {}),
+    ...(lastCan?.starts_at
+      ? {
+          cal_last_cancelled_starts_at: String(lastCan.starts_at),
+          cal_last_cancelled_attribution:
+            lastCan.session_attribution != null ? String(lastCan.session_attribution) : undefined,
+          cal_last_cancelled_reason:
+            lastCan.session_reason_code != null ? String(lastCan.session_reason_code) : undefined,
+        }
+      : {}),
+  }
+}
+
+/**
+ * Monta a mesma «linha» usada em `/admin` para `computeAdminListAttention`, a partir do GET `/admin/students/:id`.
+ */
+export function buildAdminStudentListRowFromDetail(
+  data: StudentDetailAttentionSource,
+  now = new Date()
+): AdminStudentListRow | null {
+  const stu = data.student
+  if (!stu || stu.id == null) return null
+  const enrs = Array.isArray(data.enrollments) ? data.enrollments : []
+  const primary = enrs.length ? enrs[enrs.length - 1] : null
+  const forms = Array.isArray(data.form_snapshots) ? data.form_snapshots : []
+
+  let lastForm: string | null = null
+  for (const f of forms) {
+    const u = f.updated_at
+    if (u == null || String(u).trim() === '') continue
+    const t = new Date(String(u)).getTime()
+    if (Number.isNaN(t)) continue
+    if (!lastForm || t > new Date(lastForm).getTime()) lastForm = String(u)
+  }
+
+  let snapDiag: string | null = null
+  let snapPlano: string | null = null
+  for (const f of forms) {
+    if (f.form_type === FORM_TYPES.DIAG && f.updated_at != null && String(f.updated_at).trim() !== '') {
+      snapDiag = String(f.updated_at)
+    }
+    if (f.form_type === FORM_TYPES.PLANO && f.updated_at != null && String(f.updated_at).trim() !== '') {
+      snapPlano = String(f.updated_at)
+    }
+  }
+
+  const cal = aggregateCalendarFieldsFromSessions(data.calendar_sessions, now)
+
+  return {
+    id: Number(stu.id),
+    enrollment_id: primary?.id,
+    enrollment_state: primary?.state,
+    started_at: primary?.started_at,
+    ended_at: primary?.ended_at,
+    enrollment_created_at: primary?.created_at,
+    enrollment_count: enrs.length || undefined,
+    snap_diag_updated_at: snapDiag,
+    snap_plano_updated_at: snapPlano,
+    portal_diagnostico_enabled: stu.portal_diagnostico_enabled as boolean | undefined,
+    portal_plano_90_enabled: stu.portal_plano_90_enabled as boolean | undefined,
+    last_form_activity: lastForm,
+    ...cal,
+  }
+}
+
+const CAL_SOFTEN_CANCEL_REASONS = new Set([
+  'mutual_agreement',
+  'student_cancelled_early',
+  'mentor_cancelled',
+  'technical',
+  'health',
+  'other',
+])
+
+/**
+ * Atenua alertas só baseados em silêncio no plano / formulários quando o calendário mostra ritmo saudável:
+ * próxima aula agendada em breve + (cancelamento acordado antes dessa aula OU aula realizada recentemente).
+ */
+export function shouldSoftenPlanSilenceFromCalendar(row: AdminStudentListRow, now = new Date()): boolean {
+  const nextRaw = row.cal_next_scheduled_starts_at
+  if (nextRaw == null || String(nextRaw).trim() === '') return false
+  const nextAt = new Date(String(nextRaw))
+  const nextMs = nextAt.getTime()
+  if (Number.isNaN(nextMs) || nextMs <= now.getTime()) return false
+  const daysUntilNext = Math.floor((nextMs - now.getTime()) / 864e5)
+  if (daysUntilNext > 21) return false
+
+  const cStRaw = row.cal_last_cancelled_starts_at
+  const attr = String(row.cal_last_cancelled_attribution || '').trim()
+  const reason = String(row.cal_last_cancelled_reason || '').trim()
+
+  if (cStRaw != null && String(cStRaw).trim() !== '' && reason !== 'student_no_show') {
+    const rescheduleLike =
+      attr === 'mutual' ||
+      attr === 'external' ||
+      (reason !== '' && CAL_SOFTEN_CANCEL_REASONS.has(reason))
+
+    if (rescheduleLike) {
+      const cMs = new Date(String(cStRaw)).getTime()
+      if (!Number.isNaN(cMs) && cMs < nextMs + 864e5) {
+        const daysSinceCancel = Math.floor((now.getTime() - cMs) / 864e5)
+        if (daysSinceCancel >= -1 && daysSinceCancel <= 21) return true
+      }
+    }
+  }
+
+  const doneRaw = row.cal_last_completed_starts_at
+  if (doneRaw != null && String(doneRaw).trim() !== '') {
+    const dMs = new Date(String(doneRaw)).getTime()
+    if (!Number.isNaN(dMs)) {
+      const daysSinceDone = Math.floor((now.getTime() - dMs) / 864e5)
+      if (daysSinceDone >= 0 && daysSinceDone <= 10 && daysUntilNext <= 14) return true
+    }
+  }
+
+  return false
 }
 
 export function computeAdminListAttention(
@@ -379,11 +602,14 @@ export function computeAdminListAttention(
         }
       : undefined
 
+  const calendarSoftensPlanSilence = shouldSoftenPlanSilenceFromCalendar(row, now)
+
   const h = computeMentorHealth({
     enrollment,
     form_snapshots: formsForCurrentCycle,
     now,
     portal,
+    calendarSoftensPlanSilence,
   })
 
   if (st === 'agendada') {
@@ -421,19 +647,21 @@ export function computeAdminListAttention(
 
   let detail = pickDetail()
 
-  if (st === 'ativa' && row.last_form_activity) {
-    const t = new Date(row.last_form_activity).getTime()
-    if (!Number.isNaN(t)) {
-      const days = Math.floor((now.getTime() - t) / 864e5)
-      if (days > 21 && (band === 'ok' || band === 'info')) {
-        band = 'watch'
-        detail = `Sem salvamento em qualquer formulário há ${days} dia(s) — vale uma conversa na mentoria.`
+  if (!calendarSoftensPlanSilence) {
+    if (st === 'ativa' && row.last_form_activity) {
+      const t = new Date(row.last_form_activity).getTime()
+      if (!Number.isNaN(t)) {
+        const days = Math.floor((now.getTime() - t) / 864e5)
+        if (days > 21 && (band === 'ok' || band === 'info')) {
+          band = 'watch'
+          detail = `Sem salvamento em qualquer formulário há ${days} dia(s) — vale uma conversa na mentoria.`
+        }
       }
-    }
-  } else if (st === 'ativa' && !row.last_form_activity && h.day && h.day > 7) {
-    if (band === 'ok' || band === 'info') {
-      band = 'watch'
-      detail = 'Nenhum formulário salvo no portal após vários dias de ciclo em curso.'
+    } else if (st === 'ativa' && !row.last_form_activity && h.day && h.day > 7) {
+      if (band === 'ok' || band === 'info') {
+        band = 'watch'
+        detail = 'Nenhum formulário salvo no portal após vários dias de ciclo em curso.'
+      }
     }
   }
 

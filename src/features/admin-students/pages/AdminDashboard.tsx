@@ -175,7 +175,8 @@ export default function AdminDashboard() {
           Visão geral de progresso. A coluna <strong>Mentoria</strong> mostra a última inscrição do aluno; se tiver
           vários ciclos, o número entre parênteses indica quantas inscrições existem (detalhe na ficha). A coluna{' '}
           <strong>Prioridade</strong> resume atrasos, pendências de formulários e situações que pedem atenção (passe o
-          rato para ver o detalhe).
+          rato para ver o detalhe). Aulas na agenda (próxima sessão, última realizada e último cancelamento acordado)
+          reduzem alertas só por falta de atualização no plano quando o ritmo está coerente com as sessões.
         </p>
       </div>
 

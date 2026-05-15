@@ -17,6 +17,11 @@ import { useAuth } from '@/features/auth'
 import { useToast } from '@/shared/ui/ToastContext'
 import { api, apiBlob } from '@/shared/api/client'
 import { normalizeTipTapBody } from '@/shared/lib/noteHtml'
+import {
+  MENTOR_NOTE_ATTACHMENT_ACCEPT_ATTR,
+  isMentorNoteAttachmentFileAllowed,
+  resolveMentorNoteAttachmentMime,
+} from '@/shared/lib/mentorNoteAttachments'
 import { MentorNoteBodyOrPlain } from '@/features/student-notes/components/MentorNoteBody'
 import MentorNoteRichTextEditor from '@/features/student-notes/components/MentorNoteRichTextEditor'
 
@@ -184,12 +189,24 @@ export default function AdminStudentInternalNotesPage() {
     setNoteSaving(true)
     const wasEdit = editingNoteId != null
     try {
+      for (const file of notePendingFiles) {
+        if (!resolveMentorNoteAttachmentMime(file)) {
+          toast.error(`Tipo não permitido: ${file.name}. Use PDF, PNG, JPEG, ZIP ou RAR.`)
+          setNoteSaving(false)
+          return
+        }
+        if (file.size > 8 * 1024 * 1024) {
+          toast.error(`${file.name}: máximo 8 MB.`)
+          setNoteSaving(false)
+          return
+        }
+      }
       let attachment_files
       if (notePendingFiles.length) {
         attachment_files = await Promise.all(
           notePendingFiles.map(async (file) => ({
             file_name: file.name,
-            content_type: file.type || 'application/pdf',
+            content_type: resolveMentorNoteAttachmentMime(file)!,
             data_base64: await fileToBase64(file),
           }))
         )
@@ -410,7 +427,7 @@ export default function AdminStudentInternalNotesPage() {
               <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
                 <p className="flex items-center gap-1 text-xs font-semibold uppercase text-slate-500">
                   <Paperclip className="h-3.5 w-3.5" aria-hidden />
-                  Anexos (PDF, PNG, JPEG — máx. 8 MB cada, até {NOTE_ANEXOS_MAX} por entrada)
+                  Anexos (PDF, PNG, JPEG, ZIP, RAR — máx. 8 MB cada, até {NOTE_ANEXOS_MAX} por entrada)
                 </p>
                 {editingNoteId != null && noteExistingFiles.length > 0 && (
                   <ul className="mt-2 space-y-1 text-sm">
@@ -446,13 +463,25 @@ export default function AdminStudentInternalNotesPage() {
                   ref={noteFileInputRef}
                   type="file"
                   multiple
-                  accept=".pdf,application/pdf,image/png,image/jpeg"
+                  accept={MENTOR_NOTE_ATTACHMENT_ACCEPT_ATTR}
                   className="mt-2 block w-full text-sm text-slate-600 file:mr-2 file:rounded file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-indigo-800"
                   onChange={(e) => {
                     const picked = [...(e.target.files || [])]
                     e.target.value = ''
+                    const allowed: File[] = []
+                    for (const file of picked) {
+                      if (!isMentorNoteAttachmentFileAllowed(file)) {
+                        toast.error(`Tipo não permitido: ${file.name}. Use PDF, PNG, JPEG, ZIP ou RAR.`)
+                        continue
+                      }
+                      if (file.size > 8 * 1024 * 1024) {
+                        toast.error(`${file.name}: máximo 8 MB.`)
+                        continue
+                      }
+                      allowed.push(file)
+                    }
                     setNotePendingFiles((prev) => {
-                      const merged = [...prev, ...picked]
+                      const merged = [...prev, ...allowed]
                       return merged.slice(0, NOTE_ANEXOS_MAX)
                     })
                   }}

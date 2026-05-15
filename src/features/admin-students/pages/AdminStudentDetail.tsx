@@ -40,12 +40,16 @@ import {
 } from 'lucide-react'
 import {
   buildTimeline,
+  buildAdminStudentListRowFromDetail,
+  computeAdminListAttention,
   computeMentorHealth,
+  adminAttentionBandSurfaceClass,
   getDiagnosticoSummary,
   getEnrollmentCycleProgress,
   getPlanoSummary,
   isLiveFormPredatesPrimaryEnrollment,
   isProgramStartDateInFuture,
+  shouldSoftenPlanSilenceFromCalendar,
   FORM_TYPES,
 } from '@/shared/lib/adminStudentInsight'
 import { formatProgramType } from '@/shared/lib/programType'
@@ -60,11 +64,14 @@ import MentorNoteRichTextEditor from '@/features/student-notes/components/Mentor
 import StudentAssistantWidget from '@/shared/components/StudentAssistantWidget'
 import {
   NOTE_ANEXOS_MAX,
-  statusChipStyle,
-  statusLabel,
   fileToBase64,
 } from '@/features/admin-students/admin-student-detail/helpers'
 import { formatDateTimePt as formatPt, toDateInputValue as toDateInput } from '@/shared/lib/date'
+import {
+  MENTOR_NOTE_ATTACHMENT_ACCEPT_ATTR,
+  isMentorNoteAttachmentFileAllowed,
+  resolveMentorNoteAttachmentMime,
+} from '@/shared/lib/mentorNoteAttachments'
 
 export default function AdminStudentDetail() {
   const { id } = useParams()
@@ -346,12 +353,24 @@ export default function AdminStudentDetail() {
     }
     setNoteSaving(true)
     try {
+      for (const file of notePendingFiles) {
+        if (!resolveMentorNoteAttachmentMime(file)) {
+          toast.error(`Tipo não permitido: ${file.name}. Use PDF, PNG, JPEG, ZIP ou RAR.`)
+          setNoteSaving(false)
+          return
+        }
+        if (file.size > 8 * 1024 * 1024) {
+          toast.error(`${file.name}: máximo 8 MB.`)
+          setNoteSaving(false)
+          return
+        }
+      }
       let attachment_files
       if (notePendingFiles.length) {
         attachment_files = await Promise.all(
           notePendingFiles.map(async (file) => ({
             file_name: file.name,
-            content_type: file.type || 'application/pdf',
+            content_type: resolveMentorNoteAttachmentMime(file)!,
             data_base64: await fileToBase64(file),
           }))
         )
@@ -588,6 +607,7 @@ export default function AdminStudentDetail() {
 
   const {
     health,
+    listAttention,
     timeline,
     diagSummary,
     planoSummary,
@@ -598,6 +618,7 @@ export default function AdminStudentDetail() {
     if (!data) {
       return {
         health: null,
+        listAttention: null,
         timeline: [],
         diagSummary: null,
         planoSummary: null,
@@ -628,11 +649,20 @@ export default function AdminStudentDetail() {
             portal_plano_90_enabled: !!stu.portal_plano_90_enabled,
           }
         : undefined
+    const listRow = buildAdminStudentListRowFromDetail({
+      student: data.student,
+      enrollments: data.enrollments,
+      form_snapshots: data.form_snapshots,
+      calendar_sessions: data.calendar_sessions,
+    })
+    const calendarSoftens = listRow ? shouldSoftenPlanSilenceFromCalendar(listRow) : false
     const h = computeMentorHealth({
       enrollment: primary,
       form_snapshots: formsForCurrentCycle,
       portal: portalForHealth,
+      calendarSoftensPlanSilence: calendarSoftens,
     })
+    const listAttention = listRow ? computeAdminListAttention(listRow) : null
     const t = buildTimeline({
       notes: data.notes,
       form_snapshots: forms,
@@ -640,6 +670,7 @@ export default function AdminStudentDetail() {
     })
     return {
       health: h,
+      listAttention,
       timeline: t,
       diagSummary:
         !diagStale && diagF?.payload ? getDiagnosticoSummary(diagF.payload) : null,
@@ -724,18 +755,19 @@ export default function AdminStudentDetail() {
               </p>
             )}
           </div>
-          {health && (
+          {listAttention && (
             <div
-              className={`shrink-0 self-start rounded-xl border-2 px-3 py-2.5 sm:px-4 ${statusChipStyle(health.status)}`}
+              className={`shrink-0 self-start rounded-xl border-2 px-3 py-2.5 sm:px-4 ${adminAttentionBandSurfaceClass(listAttention.band)}`}
+              title={listAttention.detail}
             >
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Situação (portal)</p>
               <p className="mt-0.5 flex items-center gap-2 text-sm font-bold">
-                {health.status === 'ok' ? (
+                {listAttention.band === 'ok' ? (
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
                 ) : (
                   <AlertTriangle className="h-4 w-4" aria-hidden />
                 )}
-                {statusLabel(health.status)}
+                {listAttention.label}
               </p>
             </div>
           )}
@@ -1560,7 +1592,8 @@ export default function AdminStudentDetail() {
         <h2 className="text-lg font-bold text-slate-900">Notas ao aluno</h2>
         <p className="mt-1 text-sm text-slate-600">
           Conteúdo com <strong>formatação</strong> (negrito, títulos, listas, links no texto), mais links e anexos em
-          baixo. Aparece em Recursos quando estiver <strong>visível</strong>. Para relatório só da mentoria, use{' '}
+          baixo (PDF, imagens, ZIP ou RAR). Aparece em Recursos quando estiver <strong>visível</strong>. Para relatório
+          só da mentoria, use{' '}
           <Link
             to={`/admin/alunos/${id}/anotacoes-internas`}
             className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
@@ -1687,7 +1720,7 @@ export default function AdminStudentDetail() {
           <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
             <p className="flex items-center gap-1 text-xs font-semibold uppercase text-slate-500">
               <Paperclip className="h-3.5 w-3.5" aria-hidden />
-              Anexos (PDF, PNG, JPEG — máx. 8 MB cada, até {NOTE_ANEXOS_MAX} por nota)
+              Anexos (PDF, PNG, JPEG, ZIP, RAR — máx. 8 MB cada, até {NOTE_ANEXOS_MAX} por nota)
             </p>
             {editingNoteId != null && noteExistingFiles.length > 0 && (
               <ul className="mt-2 space-y-1 text-sm">
@@ -1723,13 +1756,25 @@ export default function AdminStudentDetail() {
               ref={noteFileInputRef}
               type="file"
               multiple
-              accept=".pdf,application/pdf,image/png,image/jpeg"
+              accept={MENTOR_NOTE_ATTACHMENT_ACCEPT_ATTR}
               className="mt-2 block w-full text-sm text-slate-600 file:mr-2 file:rounded file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-indigo-800"
               onChange={(e) => {
                 const picked = [...(e.target.files || [])]
                 e.target.value = ''
+                const allowed: File[] = []
+                for (const file of picked) {
+                  if (!isMentorNoteAttachmentFileAllowed(file)) {
+                    toast.error(`Tipo não permitido: ${file.name}. Use PDF, PNG, JPEG, ZIP ou RAR.`)
+                    continue
+                  }
+                  if (file.size > 8 * 1024 * 1024) {
+                    toast.error(`${file.name}: máximo 8 MB.`)
+                    continue
+                  }
+                  allowed.push(file)
+                }
                 setNotePendingFiles((prev) => {
-                  const merged = [...prev, ...picked]
+                  const merged = [...prev, ...allowed]
                   return merged.slice(0, NOTE_ANEXOS_MAX)
                 })
               }}

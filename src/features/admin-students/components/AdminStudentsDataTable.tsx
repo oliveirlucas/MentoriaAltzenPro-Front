@@ -10,7 +10,11 @@ import {
 } from '@tanstack/react-table'
 import { Eye, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Filter } from 'lucide-react'
 import { formatProgramType } from '@/shared/lib/programType'
-import { computeAdminListAttention, type AdminStudentListRow } from '@/shared/lib/adminStudentInsight'
+import {
+  adminAttentionBandSurfaceClass,
+  computeAdminListAttention,
+  type AdminStudentListRow,
+} from '@/shared/lib/adminStudentInsight'
 
 /** Linha da tabela admin (GET /admin/students) — tipagem incremental. */
 type AdminStudentRow = any
@@ -31,21 +35,6 @@ function enrollmentStateLabel(state) {
       return 'Encerrada'
     default:
       return state ? String(state) : '—'
-  }
-}
-
-function attentionChipClass(band) {
-  switch (band) {
-    case 'critical':
-      return 'border-rose-300 bg-rose-50 text-rose-950'
-    case 'late':
-      return 'border-orange-300 bg-orange-50 text-orange-950'
-    case 'watch':
-      return 'border-amber-300 bg-amber-50 text-amber-950'
-    case 'info':
-      return 'border-sky-300 bg-sky-50 text-sky-950'
-    default:
-      return 'border-emerald-200 bg-emerald-50 text-emerald-900'
   }
 }
 
@@ -205,7 +194,7 @@ export default function AdminStudentsDataTable({ students = [] }: { students?: A
             const att = computeAdminListAttention(s as AdminStudentListRow)
             return (
               <span
-                className={`inline-flex max-w-full cursor-default rounded-full border px-2.5 py-0.5 text-xs font-semibold ${attentionChipClass(
+                className={`inline-flex max-w-full cursor-default rounded-full border px-2.5 py-0.5 text-xs font-semibold ${adminAttentionBandSurfaceClass(
                   att.band
                 )}`}
                 title={att.detail}

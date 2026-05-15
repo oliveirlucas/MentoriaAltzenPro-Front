@@ -4,26 +4,28 @@ import { useAuth } from '@/features/auth'
 import { useToast } from '@/shared/ui/ToastContext'
 import { api } from '@/shared/api/client'
 import {
-  sessionStatusLabelPt,
-  sessionStatusChipClass,
   SESSION_ATTRIBUTION_OPTIONS,
   SESSION_REASON_OPTIONS,
 } from '@/shared/lib/calendarSessionLabels'
+import AdminCalendarMonthGrid from '@/features/admin-calendar/components/AdminCalendarMonthGrid'
+import CalendarEventRow from '@/features/admin-calendar/components/CalendarEventRow'
+import {
+  ADMIN_CALENDAR_VIEW_TZ,
+  buildMonthGridCells,
+  civilYmdFromInstantInZone,
+  civilYmdTodayInZone,
+  formatWeekdayLongFromYmd,
+} from '@/features/admin-calendar/lib/calendarSp'
 import {
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   Link2,
   Loader2,
   LogOut,
-  Pencil,
   Plus,
   Shield,
   Trash2,
-  User,
-  Video,
 } from 'lucide-react'
 
 const TIME_ZONE_OPTIONS = [
@@ -43,18 +45,6 @@ function startOfMonth(d) {
 
 function endOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999)
-}
-
-function formatDayTitle(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return String(iso)
-  return d.toLocaleDateString('pt-BR', {
-    weekday: 'short',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
 }
 
 function formatTimeRange(start, end, allDay) {
@@ -128,6 +118,9 @@ export default function AdminCalendarPage() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const deleteModalTitleId = useId()
+  const eventFormModalTitleId = useId()
+  /** Dia civil em {ADMIN_CALENDAR_VIEW_TZ} selecionado na grelha; null = mostrar todo o mês. */
+  const [selectedDayYmd, setSelectedDayYmd] = useState(null)
 
   useEffect(() => {
     const ok = searchParams.get('calendar')
@@ -212,27 +205,84 @@ export default function AdminCalendarPage() {
   }, [loadEvents])
 
   useEffect(() => {
+    const anyModalOpen = Boolean(showForm || outcomeModal || deleteTarget)
+    if (!anyModalOpen) return
+    const prevBodyOverflow = document.body.style.overflow
+    const prevHtmlOverflow = document.documentElement.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevBodyOverflow
+      document.documentElement.style.overflow = prevHtmlOverflow
+    }
+  }, [showForm, outcomeModal, deleteTarget])
+
+  useEffect(() => {
     if (!deleteTarget) return
     const onKey = (e) => {
       if (e.key === 'Escape' && !deleteBusy) setDeleteTarget(null)
     }
     document.addEventListener('keydown', onKey)
-    document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
     }
   }, [deleteTarget, deleteBusy])
 
   const eventsByDay = useMemo(() => {
     const m = new Map()
     for (const ev of events) {
-      const key = ev.start ? String(ev.start).slice(0, 10) : '_'
+      const key = civilYmdFromInstantInZone(ev.start, ADMIN_CALENDAR_VIEW_TZ)
+      if (key === '_') continue
       if (!m.has(key)) m.set(key, [])
       m.get(key).push(ev)
     }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => {
+        const ta = a.start ? new Date(a.start).getTime() : 0
+        const tb = b.start ? new Date(b.start).getTime() : 0
+        return ta - tb
+      })
+    }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [events])
+
+  const summaryByYmd = useMemo(() => {
+    const out = new Map()
+    for (const ev of events) {
+      const ymd = civilYmdFromInstantInZone(ev.start, ADMIN_CALENDAR_VIEW_TZ)
+      if (ymd === '_') continue
+      const cur = out.get(ymd) || {
+        total: 0,
+        scheduled: 0,
+        completed: 0,
+        cancelled: 0,
+        notHeld: 0,
+      }
+      cur.total += 1
+      const st = ev.sessionStatus || ''
+      if (st === 'scheduled') cur.scheduled += 1
+      else if (st === 'completed') cur.completed += 1
+      else if (st === 'cancelled') cur.cancelled += 1
+      else if (st === 'not_held') cur.notHeld += 1
+      else cur.scheduled += 1
+      out.set(ymd, cur)
+    }
+    return out
+  }, [events])
+
+  const monthGridCells = useMemo(
+    () => buildMonthGridCells(monthCursor.getFullYear(), monthCursor.getMonth(), true),
+    [monthCursor]
+  )
+
+  const todayYmdSp = useMemo(() => civilYmdTodayInZone(ADMIN_CALENDAR_VIEW_TZ), [])
+
+  const displayedDayBlocks = useMemo(() => {
+    if (!selectedDayYmd) return eventsByDay
+    const hit = eventsByDay.find(([k]) => k === selectedDayYmd)
+    if (hit) return [hit]
+    return [[selectedDayYmd, []]]
+  }, [selectedDayYmd, eventsByDay])
 
   const connectGoogle = async () => {
     setConnectBusy(true)
@@ -440,6 +490,16 @@ export default function AdminCalendarPage() {
     setDeleteTarget(ev)
   }
 
+  const handleSelectGridDay = useCallback((ymd) => {
+    setSelectedDayYmd((prev) => (prev === ymd ? null : ymd))
+  }, [])
+
+  const goToToday = useCallback(() => {
+    const now = new Date()
+    setMonthCursor(startOfMonth(now))
+    setSelectedDayYmd(civilYmdTodayInZone(ADMIN_CALENDAR_VIEW_TZ))
+  }, [])
+
   const confirmDeleteEvent = async () => {
     const ev = deleteTarget
     if (!ev?.id) return
@@ -558,7 +618,10 @@ export default function AdminCalendarPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setMonthCursor((d) => startOfMonth(new Date(d.getFullYear(), d.getMonth() - 1, 1)))}
+                onClick={() => {
+                  setSelectedDayYmd(null)
+                  setMonthCursor((d) => startOfMonth(new Date(d.getFullYear(), d.getMonth() - 1, 1)))
+                }}
                 className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
                 aria-label="Mês anterior"
               >
@@ -567,7 +630,10 @@ export default function AdminCalendarPage() {
               <h2 className="min-w-[10rem] text-center text-lg font-semibold capitalize text-slate-900">{range.label}</h2>
               <button
                 type="button"
-                onClick={() => setMonthCursor((d) => startOfMonth(new Date(d.getFullYear(), d.getMonth() + 1, 1)))}
+                onClick={() => {
+                  setSelectedDayYmd(null)
+                  setMonthCursor((d) => startOfMonth(new Date(d.getFullYear(), d.getMonth() + 1, 1)))
+                }}
                 className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
                 aria-label="Mês seguinte"
               >
@@ -603,357 +669,90 @@ export default function AdminCalendarPage() {
             </button>
           </div>
 
-          {showForm && (
-            <form
-              onSubmit={submitEvent}
-              className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 shadow-sm"
-            >
-              <h3 className="text-base font-bold text-slate-900">
-                {editingEventId ? 'Editar agendamento' : 'Criar evento no calendário principal'}
-              </h3>
-              <p className="mt-1 text-xs text-slate-600">
-                Datas em <strong>AAAA-MM-DD</strong>, horas em <strong>HH:mm</strong> (24h). Opcionalmente cria uma
-                sala <strong>Google Meet</strong> vinculada ao evento. Associe um <strong>aluno</strong> para acompanhar
-                aulas realizadas no detalhe do aluno.
-              </p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="block sm:col-span-2">
-                  <span className="text-xs font-medium text-slate-600">Título (ex.: Aula — João)</span>
-                  <input
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={formSummary}
-                    onChange={(e) => setFormSummary(e.target.value)}
-                    required
-                  />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="text-xs font-medium text-slate-600">Notas (opcional)</span>
-                  <textarea
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    rows={3}
-                    value={formDescription}
-                    onChange={(e) => setFormDescription(e.target.value)}
-                  />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="text-xs font-medium text-slate-600">Aluno (opcional)</span>
-                  <select
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={formStudentId}
-                    onChange={(e) => setFormStudentId(e.target.value)}
-                  >
-                    <option value="">— Sem aluno associado —</option>
-                    {studentOptions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {(s.full_name || s.email || '').trim() || `Usuário #${s.id}`} ({s.email})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {editingEventId ? (
-                  <label className="block sm:col-span-2">
-                    <span className="text-xs font-medium text-slate-600">Estado da aula</span>
-                    <select
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      value={formSessionStatus}
-                      onChange={(e) => setFormSessionStatus(e.target.value)}
-                    >
-                      <option value="scheduled">Agendada</option>
-                      <option value="completed">Realizada</option>
-                      <option value="not_held">Não realizada</option>
-                      <option value="cancelled">Cancelada</option>
-                    </select>
-                  </label>
-                ) : null}
-                {editingEventId &&
-                formStudentId &&
-                (formSessionStatus === 'not_held' || formSessionStatus === 'cancelled') ? (
-                  <>
-                    <label className="block sm:col-span-2">
-                      <span className="text-xs font-medium text-slate-600">Atribuição (quem caracteriza a situação)</span>
-                      <select
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        value={formSessionAttribution}
-                        onChange={(e) => setFormSessionAttribution(e.target.value)}
-                        required
-                      >
-                        <option value="">— Escolher —</option>
-                        {SESSION_ATTRIBUTION_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block sm:col-span-2">
-                      <span className="text-xs font-medium text-slate-600">Motivo</span>
-                      <select
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        value={formSessionReasonCode}
-                        onChange={(e) => setFormSessionReasonCode(e.target.value)}
-                        required
-                      >
-                        <option value="">— Escolher —</option>
-                        {SESSION_REASON_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block sm:col-span-2">
-                      <span className="text-xs font-medium text-slate-600">
-                        Nota visível ao aluno (opcional)
-                      </span>
-                      <textarea
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        rows={2}
-                        value={formSessionReasonNote}
-                        onChange={(e) => setFormSessionReasonNote(e.target.value)}
-                        placeholder="Ex.: remarcamos para a terça; aluno avisou com 24h."
-                      />
-                    </label>
-                    <label className="block sm:col-span-2">
-                      <span className="text-xs font-medium text-slate-600">
-                        Nota interna (só mentor, não aparece ao aluno)
-                      </span>
-                      <textarea
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        rows={2}
-                        value={formMentorPrivateNote}
-                        onChange={(e) => setFormMentorPrivateNote(e.target.value)}
-                      />
-                    </label>
-                  </>
-                ) : null}
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-600">Data de início</span>
-                  <input
-                    type="date"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={formStartDate}
-                    onChange={(e) => setFormStartDate(e.target.value)}
-                    required
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-600">Hora de início</span>
-                  <input
-                    type="time"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={formStartTime}
-                    onChange={(e) => setFormStartTime(e.target.value)}
-                    required
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-600">Data de fim</span>
-                  <input
-                    type="date"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={formEndDate}
-                    onChange={(e) => setFormEndDate(e.target.value)}
-                    required
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-600">Hora de fim</span>
-                  <input
-                    type="time"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={formEndTime}
-                    onChange={(e) => setFormEndTime(e.target.value)}
-                    required
-                  />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="text-xs font-medium text-slate-600">Fuso horário (IANA)</span>
-                  <select
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={formTimeZone}
-                    onChange={(e) => setFormTimeZone(e.target.value)}
-                  >
-                    {TIME_ZONE_OPTIONS.map((z) => (
-                      <option key={z.value} value={z.value}>
-                        {z.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 sm:col-span-2">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 text-indigo-600"
-                    checked={formCreateMeet}
-                    onChange={(e) => setFormCreateMeet(e.target.checked)}
-                  />
-                  <span className="text-sm text-slate-800">
-                    Criar sala Google Meet para este agendamento
-                    {editingEventId ? (
-                      <span className="block text-xs font-normal text-slate-500">
-                        Ao editar: se o evento <strong>ainda não tiver</strong> link Meet, marque aqui e guarde para a
-                        API criar a sala. Se já existir Meet, o Google mantém o link (desmarcar não remove a reunião).
-                      </span>
-                    ) : null}
-                  </span>
-                </label>
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Vista do mês</h3>
+                <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+                  Toque num dia para filtrar a lista abaixo. Cores: <span className="text-amber-700">agendada</span>,{' '}
+                  <span className="text-emerald-700">realizada</span>, <span className="text-slate-600">cancelada / não realizada</span>.
+                </p>
               </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  disabled={formSaving}
-                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
-                >
-                  {formSaving ? (
-                    <>
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                      Salvando…
-                    </>
-                  ) : editingEventId ? (
-                    'Atualizar agendamento'
-                  ) : (
-                    'Salvar no Google Calendar'
-                  )}
-                </button>
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    resetForm()
-                    setShowForm(false)
-                  }}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                  onClick={goToToday}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
                 >
-                  Fechar
+                  Ir para hoje
                 </button>
+                {selectedDayYmd ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDayYmd(null)}
+                    className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-900 hover:bg-indigo-100"
+                  >
+                    Ver mês inteiro na lista
+                  </button>
+                ) : null}
               </div>
-            </form>
-          )}
+            </div>
+            {eventsBusy ? (
+              <p className="mt-4 flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Carregando grelha…
+              </p>
+            ) : (
+              <div className="mt-4">
+                <AdminCalendarMonthGrid
+                  cells={monthGridCells}
+                  todayYmd={todayYmdSp}
+                  selectedYmd={selectedDayYmd}
+                  onSelectYmd={handleSelectGridDay}
+                  summaryByYmd={summaryByYmd}
+                />
+              </div>
+            )}
+          </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-base font-bold text-slate-900">Eventos do mês</h3>
+            <h3 className="text-base font-bold text-slate-900">
+              {selectedDayYmd
+                ? `Agendamentos — ${formatWeekdayLongFromYmd(selectedDayYmd)}`
+                : `Todos os agendamentos — ${range.label}`}
+            </h3>
             {eventsBusy ? (
               <p className="mt-4 flex items-center gap-2 text-sm text-slate-500">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Carregando eventos…
               </p>
-            ) : eventsByDay.length === 0 ? (
+            ) : events.length === 0 && !selectedDayYmd ? (
               <p className="mt-4 text-sm text-slate-500">Sem eventos neste período.</p>
             ) : (
               <ul className="mt-4 space-y-6">
-                {eventsByDay.map(([dayKey, dayEvents]) => (
+                {displayedDayBlocks.map(([dayKey, dayEvents]) => (
                   <li key={dayKey}>
                     <p className="border-b border-slate-200 pb-1 text-sm font-semibold text-slate-800">
-                      {formatDayTitle(dayKey === '_' ? dayEvents[0]?.start : `${dayKey}T12:00:00`)}
+                      {formatWeekdayLongFromYmd(dayKey)}
                     </p>
-                    <ul className="mt-2 space-y-2">
-                      {dayEvents.map((ev) => (
-                        <li
-                          key={ev.id}
-                          className="flex flex-col gap-1 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium text-slate-900">{ev.summary}</p>
-                              {ev.sessionStatus ? (
-                                <span
-                                  className={`rounded-full border px-2 py-0.5 text-xs font-medium ${sessionStatusChipClass(ev.sessionStatus)}`}
-                                >
-                                  {sessionStatusLabelPt(ev.sessionStatus)}
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="text-xs text-slate-500">
-                              {formatTimeRange(ev.start, ev.end, ev.allDay)}
-                            </p>
-                            {ev.student ? (
-                              <p className="mt-1 flex items-center gap-1 text-xs text-indigo-800">
-                                <User className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                <span>
-                                  {ev.student.full_name || ev.student.email}
-                                  {ev.student.full_name && ev.student.email ? ` · ${ev.student.email}` : ''}
-                                </span>
-                              </p>
-                            ) : null}
-                            {ev.description ? (
-                              <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-600">
-                                {ev.description}
-                              </p>
-                            ) : null}
-                          </div>
-                          <div className="flex shrink-0 flex-wrap gap-2">
-                            <button
-                              type="button"
-                              disabled={eventActionBusy === ev.id}
-                              onClick={() => openEditEvent(ev)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50 sm:text-sm"
-                            >
-                              <Pencil className="h-3.5 w-3.5" aria-hidden />
-                              Editar
-                            </button>
-                            <button
-                              type="button"
-                              disabled={
-                                eventActionBusy === ev.id ||
-                                (deleteBusy && deleteTarget?.id === ev.id)
-                              }
-                              onClick={() => openDeleteModal(ev)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 sm:text-sm"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                              Excluir
-                            </button>
-                            {ev.sessionDbId && ev.student && ev.sessionStatus !== 'completed' ? (
-                              <button
-                                type="button"
-                                disabled={eventActionBusy === ev.id}
-                                onClick={() => markSessionCompleted(ev)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50 sm:text-sm"
-                              >
-                                {eventActionBusy === ev.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                                ) : (
-                                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-                                )}
-                                Marcar realizada
-                              </button>
-                            ) : null}
-                            {ev.sessionDbId && ev.student ? (
-                              <button
-                                type="button"
-                                disabled={outcomeSaving || eventActionBusy === ev.id}
-                                onClick={() => openOutcomeModal(ev)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-medium text-rose-900 hover:bg-rose-100 disabled:opacity-50 sm:text-sm"
-                              >
-                                {ev.sessionStatus === 'not_held' || ev.sessionStatus === 'cancelled'
-                                  ? 'Editar falta / cancelamento'
-                                  : 'Não realizada / cancelada'}
-                              </button>
-                            ) : null}
-                            {ev.meetLink && (
-                              <a
-                                href={ev.meetLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 sm:text-sm"
-                              >
-                                <Video className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                Entrar no Meet
-                              </a>
-                            )}
-                            {ev.htmlLink && (
-                              <a
-                                href={ev.htmlLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700 hover:underline"
-                              >
-                                Google Calendar
-                                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                              </a>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
+                    {dayEvents.length === 0 ? (
+                      <p className="mt-3 text-sm text-slate-500">Nenhum agendamento neste dia.</p>
+                    ) : (
+                      <ul className="mt-2 space-y-2">
+                        {dayEvents.map((ev) => (
+                          <CalendarEventRow
+                            key={ev.id}
+                            ev={ev}
+                            eventActionBusy={eventActionBusy}
+                            deleteBusy={deleteBusy}
+                            deleteTargetId={deleteTarget?.id}
+                            outcomeSaving={outcomeSaving}
+                            onEdit={openEditEvent}
+                            onDelete={openDeleteModal}
+                            onMarkCompleted={markSessionCompleted}
+                            onOutcome={openOutcomeModal}
+                          />
+                        ))}
+                      </ul>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -963,7 +762,7 @@ export default function AdminCalendarPage() {
       )}
 
       {outcomeModal ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex max-h-[100dvh] items-center justify-center overflow-y-auto overscroll-contain p-4">
           <button
             type="button"
             className="absolute inset-0 z-0 cursor-default border-0 bg-slate-900/50 p-0"
@@ -1067,7 +866,7 @@ export default function AdminCalendarPage() {
       ) : null}
 
       {deleteTarget ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex max-h-[100dvh] items-center justify-center overflow-y-auto overscroll-contain p-4">
           <button
             type="button"
             className="absolute inset-0 z-0 cursor-default border-0 bg-slate-900/50 p-0"
@@ -1129,6 +928,247 @@ export default function AdminCalendarPage() {
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {showForm ? (
+        <div className="fixed inset-0 z-[100] flex max-h-[100dvh] items-start justify-center overflow-y-auto overscroll-contain p-4 py-8 sm:py-10">
+          <button
+            type="button"
+            className="absolute inset-0 z-0 cursor-default border-0 bg-slate-900/50 p-0"
+            onClick={() => {
+              if (!formSaving) {
+                resetForm()
+                setShowForm(false)
+              }
+            }}
+            aria-label="Fechar"
+          />
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={eventFormModalTitleId}
+            onSubmit={submitEvent}
+            className="relative z-10 w-full max-h-[min(90vh,56rem)] max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl sm:p-6"
+          >
+            <h2 id={eventFormModalTitleId} className="text-lg font-bold text-slate-900">
+              {editingEventId ? 'Editar agendamento' : 'Novo agendamento'}
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Datas em <strong>AAAA-MM-DD</strong>, horas em <strong>HH:mm</strong> (24h). Opcionalmente cria uma sala{' '}
+              <strong>Google Meet</strong> vinculada ao evento. Associe um <strong>aluno</strong> para acompanhar aulas
+              realizadas no detalhe do aluno.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block sm:col-span-2">
+                <span className="text-xs font-medium text-slate-600">Título (ex.: Aula — João)</span>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={formSummary}
+                  onChange={(e) => setFormSummary(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="text-xs font-medium text-slate-600">Notas (opcional)</span>
+                <textarea
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  rows={3}
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="text-xs font-medium text-slate-600">Aluno (opcional)</span>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={formStudentId}
+                  onChange={(e) => setFormStudentId(e.target.value)}
+                >
+                  <option value="">— Sem aluno associado —</option>
+                  {studentOptions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {(s.full_name || s.email || '').trim() || `Usuário #${s.id}`} ({s.email})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {editingEventId ? (
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-slate-600">Estado da aula</span>
+                  <select
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={formSessionStatus}
+                    onChange={(e) => setFormSessionStatus(e.target.value)}
+                  >
+                    <option value="scheduled">Agendada</option>
+                    <option value="completed">Realizada</option>
+                    <option value="not_held">Não realizada</option>
+                    <option value="cancelled">Cancelada</option>
+                  </select>
+                </label>
+              ) : null}
+              {editingEventId &&
+              formStudentId &&
+              (formSessionStatus === 'not_held' || formSessionStatus === 'cancelled') ? (
+                <>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-slate-600">Atribuição (quem caracteriza a situação)</span>
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                      value={formSessionAttribution}
+                      onChange={(e) => setFormSessionAttribution(e.target.value)}
+                      required
+                    >
+                      <option value="">— Escolher —</option>
+                      {SESSION_ATTRIBUTION_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-slate-600">Motivo</span>
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                      value={formSessionReasonCode}
+                      onChange={(e) => setFormSessionReasonCode(e.target.value)}
+                      required
+                    >
+                      <option value="">— Escolher —</option>
+                      {SESSION_REASON_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-slate-600">Nota visível ao aluno (opcional)</span>
+                    <textarea
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                      rows={2}
+                      value={formSessionReasonNote}
+                      onChange={(e) => setFormSessionReasonNote(e.target.value)}
+                      placeholder="Ex.: remarcamos para a terça; aluno avisou com 24h."
+                    />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-slate-600">
+                      Nota interna (só mentor, não aparece ao aluno)
+                    </span>
+                    <textarea
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                      rows={2}
+                      value={formMentorPrivateNote}
+                      onChange={(e) => setFormMentorPrivateNote(e.target.value)}
+                    />
+                  </label>
+                </>
+              ) : null}
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Data de início</span>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={formStartDate}
+                  onChange={(e) => setFormStartDate(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Hora de início</span>
+                <input
+                  type="time"
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={formStartTime}
+                  onChange={(e) => setFormStartTime(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Data de fim</span>
+                <input
+                  type="date"
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={formEndDate}
+                  onChange={(e) => setFormEndDate(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">Hora de fim</span>
+                <input
+                  type="time"
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={formEndTime}
+                  onChange={(e) => setFormEndTime(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <span className="text-xs font-medium text-slate-600">Fuso horário (IANA)</span>
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={formTimeZone}
+                  onChange={(e) => setFormTimeZone(e.target.value)}
+                >
+                  {TIME_ZONE_OPTIONS.map((z) => (
+                    <option key={z.value} value={z.value}>
+                      {z.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                  checked={formCreateMeet}
+                  onChange={(e) => setFormCreateMeet(e.target.checked)}
+                />
+                <span className="text-sm text-slate-800">
+                  Criar sala Google Meet para este agendamento
+                  {editingEventId ? (
+                    <span className="block text-xs font-normal text-slate-500">
+                      Ao editar: se o evento <strong>ainda não tiver</strong> link Meet, marque aqui e guarde para a API
+                      criar a sala. Se já existir Meet, o Google mantém o link (desmarcar não remove a reunião).
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            </div>
+            <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                disabled={formSaving}
+                onClick={() => {
+                  resetForm()
+                  setShowForm(false)
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Fechar
+              </button>
+              <button
+                type="submit"
+                disabled={formSaving}
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60"
+              >
+                {formSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                    Salvando…
+                  </>
+                ) : editingEventId ? (
+                  'Atualizar agendamento'
+                ) : (
+                  'Salvar no Google Calendar'
+                )}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
     </div>

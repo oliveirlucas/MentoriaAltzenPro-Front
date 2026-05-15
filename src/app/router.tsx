@@ -1,8 +1,9 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from '@/features/auth'
 import { ProtectedRoute } from '@/features/layout-shell/components/ProtectedRoute'
 import { AdminRoute } from '@/features/layout-shell/components/AdminRoute'
 import Home from '@/features/landing/pages/Home'
+import LoginPage from '@/features/auth/pages/LoginPage'
 import DiagnosticoPage from '@/features/diagnostico/pages/DiagnosticoPage'
 import Plano90DiasPage from '@/features/plano-90-dias/pages/Plano90DiasPage'
 import Dashboard from '@/features/student-dashboard/pages/Dashboard'
@@ -14,16 +15,19 @@ import ProfilePage from '@/features/profile/pages/ProfilePage'
 import ResourcesPage from '@/features/resources/pages/ResourcesPage'
 import StudentSelfNotesPage from '@/features/student-notes/pages/StudentSelfNotesPage'
 
-function LoginLegacyRedirect() {
-  const { search } = useLocation()
-  return <Navigate to={{ pathname: '/', search }} replace />
+/** A landing page é sempre pública.
+ *  Continuamos exibindo-a também para usuários logados — eles podem optar por navegar
+ *  até `/login` ou diretamente para o dashboard. Isso evita "sequestrar" a `/`. */
+function Landing() {
+  return <Home />
 }
 
-function Landing() {
+/** Tela de login: se já estiver autenticado, manda direto para o destino apropriado. */
+function Login() {
   const { user, profile, loading } = useAuth()
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">
         Carregando…
       </div>
     )
@@ -32,14 +36,14 @@ function Landing() {
     if (profile?.role === 'admin') return <Navigate to="/admin" replace />
     return <Navigate to="/dashboard" replace />
   }
-  return <Home />
+  return <LoginPage />
 }
 
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
-      <Route path="/login" element={<LoginLegacyRedirect />} />
+      <Route path="/login" element={<Login />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<Dashboard />} />

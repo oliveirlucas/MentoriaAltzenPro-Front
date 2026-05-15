@@ -15,7 +15,7 @@ export function ProtectedRoute() {
   }
   if (!user) {
     const ret = loc.pathname + loc.search
-    return <Navigate to={`/?from=${encodeURIComponent(ret)}`} replace />
+    return <Navigate to={`/login?from=${encodeURIComponent(ret)}`} replace />
   }
   return (
     <AppShell>

@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Landing page — garante que o scroll container raiz tenha position relative, evitando o aviso
+   do Framer Motion: "Please ensure that the container has a non-static position…". */
+html.altzenpro-landing,
+html.altzenpro-landing body {
+  position: relative;
+  background-color: #050816;
+}
+
 /* Editor de notas (TipTap) — restaurar estilos que o Preflight do Tailwind remove dentro do ProseMirror */
 .mentor-tiptap-editor .ProseMirror {
   outline: none;

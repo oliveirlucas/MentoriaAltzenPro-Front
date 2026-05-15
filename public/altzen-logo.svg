@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <!--
+    AltzenPro  vers�o simplificada da marca, otimizada para extrus�o 3D.
+    Path �nico com sub-paths e fill-rule="evenodd": o tri�ngulo arredondado externo
+    define a silhueta; o "swoosh"/Z interno � recortado como um furo.
+  -->
+  <path
+    fill="#2563eb"
+    fill-rule="evenodd"
+    d="
+      M 200 40
+      C 218 40 232 52 242 72
+      L 354 300
+      C 366 324 358 350 332 354
+      C 322 356 310 356 296 356
+      L 104 356
+      C 90 356 78 356 68 354
+      C 42 350 34 324 46 300
+      L 158 72
+      C 168 52 182 40 200 40
+      Z
+      M 200 138
+      L 268 256
+      C 270 260 268 264 264 264
+      L 230 264
+      C 226 264 222 262 220 258
+      L 208 236
+      L 196 270
+      C 194 274 190 276 186 276
+      L 152 276
+      C 148 276 146 272 148 268
+      L 200 138
+      Z
+    "
+  />
+</svg>

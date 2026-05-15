@@ -16,21 +16,6 @@ import {
 } from 'lucide-react'
 import StudentNotesBell from '@/features/student-notes/components/StudentNotesBell'
 import StudentAssistantWidget from '@/shared/components/StudentAssistantWidget'
-import mentorEsquerda from '@/assets/MentorEsquerda.png'
-import mentorDireita from '@/assets/MentorDireita.png'
-
-/** Largura lógica máxima para alinhar faixas ao main em ultra-wide (comportamento tipo 1920px). */
-const STUDENT_SHELL_MAX_PX = 1920
-
-const studentShellSideWidth = `calc((min(100vw, ${STUDENT_SHELL_MAX_PX}px) - min(min(100vw, ${STUDENT_SHELL_MAX_PX}px), 72rem)) / 2)`
-const studentShellSideInset = `calc((100vw - min(100vw, ${STUDENT_SHELL_MAX_PX}px)) / 2)`
-
-/** Mesmas dimensões/escala nas duas faixas; só varia object-position (espelho em X). */
-const studentMentorImgShared =
-  'h-full w-full min-h-0 max-h-full max-w-full object-cover min-[1921px]:h-auto min-[1921px]:w-auto min-[1921px]:max-h-[min(100%,max-content)] min-[1921px]:max-w-[min(100%,max-content)] min-[1921px]:object-contain'
-
-/** Deve bater com o `pt-16` do conteúdo (altura reservada ao header fixo). */
-const SHELL_HEADER_TOP_CLASS = 'top-16'
 
 export default function AppShell({ children }) {
   const { user, profile, logout } = useAuth()
@@ -253,42 +238,7 @@ export default function AppShell({ children }) {
         </>
       )}
       <div className="pt-16 min-h-0">
-      {isStudent ? (
-        <>
-          {/* Faixas com a mesma largura; imagens com a mesma escala (studentMentorImgShared + espelho em object-position). */}
-          <div
-            aria-hidden
-            className={`pointer-events-none fixed ${SHELL_HEADER_TOP_CLASS} bottom-0 z-0 hidden overflow-hidden lg:flex lg:items-end lg:justify-end`}
-            style={{ left: studentShellSideInset, width: studentShellSideWidth }}
-          >
-            <img
-              src={mentorEsquerda}
-              alt=""
-              className={`${studentMentorImgShared} [object-position:right_top]`}
-              loading="lazy"
-              decoding="async"
-            />
-          </div>
-          <div
-            aria-hidden
-            className={`pointer-events-none fixed ${SHELL_HEADER_TOP_CLASS} bottom-0 z-0 hidden overflow-hidden lg:flex lg:items-end lg:justify-start`}
-            style={{ right: studentShellSideInset, width: studentShellSideWidth }}
-          >
-            <img
-              src={mentorDireita}
-              alt=""
-              className={`${studentMentorImgShared} [object-position:left_top]`}
-              loading="lazy"
-              decoding="async"
-            />
-          </div>
-          <main className="relative z-10 mx-auto min-w-0 w-full max-w-6xl px-4 py-6">
-            {children}
-          </main>
-        </>
-      ) : (
-        <main className="mx-auto min-w-0 max-w-6xl px-4 py-6">{children}</main>
-      )}
+        <main className="relative z-10 mx-auto min-w-0 w-full max-w-6xl px-4 py-6">{children}</main>
       </div>
       {isStudent && user && <StudentAssistantWidget firstName={studentMentorXName} />}
     </div>

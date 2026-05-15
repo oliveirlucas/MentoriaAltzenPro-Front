@@ -19,6 +19,7 @@ import {
 } from '@/shared/lib/calendarSessionLabels'
 import { formatDatePt, formatDateTimePt } from '@/shared/lib/date'
 import { useEffect, useState } from 'react'
+import { CalendarSessionsKpiGrid } from '@/shared/components/CalendarSessionsKpiGrid'
 
 /** Agrupa linhas de enrollment_form_archives por inscrição */
 function archivesByEnrollment(archiveRows) {
@@ -97,14 +98,17 @@ export default function Dashboard() {
     [calendarSessions]
   )
 
-  const sessionStats = useMemo(() => {
+  const calCounts = useMemo(() => {
     const list = calendarSessions || []
-    return {
-      completed: list.filter((s) => s.session_status === 'completed').length,
-      scheduled: list.filter((s) => s.session_status === 'scheduled').length,
-      cancelled: list.filter((s) => s.session_status === 'cancelled').length,
-      notHeld: list.filter((s) => s.session_status === 'not_held').length,
+    const c = { total: list.length, completed: 0, scheduled: 0, cancelled: 0, not_held: 0 }
+    for (const s of list) {
+      const st = s.session_status
+      if (st === 'completed') c.completed += 1
+      else if (st === 'scheduled') c.scheduled += 1
+      else if (st === 'cancelled') c.cancelled += 1
+      else if (st === 'not_held') c.not_held += 1
     }
+    return c
   }, [calendarSessions])
 
   const portalDiag = profile?.portal_diagnostico_enabled === true
@@ -382,17 +386,7 @@ export default function Dashboard() {
           ocorreu na prática, independentemente do dia no programa (90 dias).
         </p>
 
-        {calendarSessions.length > 0 && (
-          <p className="mt-3 text-sm font-medium text-slate-800">
-            Resumo: <span className="text-emerald-800">{sessionStats.completed} realizada(s)</span>
-            {' · '}
-            <span className="text-amber-900">{sessionStats.scheduled} agendada(s)</span>
-            {' · '}
-            <span className="text-slate-700">{sessionStats.cancelled} cancelada(s)</span>
-            {' · '}
-            <span className="text-rose-800">{sessionStats.notHeld} não realizada(s)</span>
-          </p>
-        )}
+        <CalendarSessionsKpiGrid counts={calCounts} className="mb-5 mt-4" />
 
         {calendarSessions.length === 0 && (
           <p className="mt-4 text-sm text-slate-500">

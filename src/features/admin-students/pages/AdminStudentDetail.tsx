@@ -62,6 +62,7 @@ import {
 import { normalizeTipTapBody, stripHtmlToPlain } from '@/shared/lib/noteHtml'
 import MentorNoteRichTextEditor from '@/features/student-notes/components/MentorNoteRichTextEditor'
 import StudentAssistantWidget from '@/shared/components/StudentAssistantWidget'
+import { CalendarSessionsKpiGrid } from '@/shared/components/CalendarSessionsKpiGrid'
 import {
   NOTE_ANEXOS_MAX,
   fileToBase64,
@@ -72,6 +73,7 @@ import {
   isMentorNoteAttachmentFileAllowed,
   resolveMentorNoteAttachmentMime,
 } from '@/shared/lib/mentorNoteAttachments'
+import { linkedInAvatarUrlFromProfileField } from '@/shared/lib/linkedinProfile'
 
 export default function AdminStudentDetail() {
   const { id } = useParams()
@@ -127,6 +129,7 @@ export default function AdminStudentDetail() {
   const contractDeleteModalTitleId = useId()
   const [snapBusyId, setSnapBusyId] = useState(null)
   const [portalAccessBusy, setPortalAccessBusy] = useState(false)
+  const [linkedinAvatarFailed, setLinkedinAvatarFailed] = useState(false)
 
   const patchStudentPortalAccess = useCallback(async (partial) => {
     if (!id) return
@@ -164,6 +167,10 @@ export default function AdminStudentDetail() {
       u.country,
     ].join('\u0000')
   }, [id, data?.student])
+
+  useEffect(() => {
+    setLinkedinAvatarFailed(false)
+  }, [studentSyncKey])
 
   useEffect(() => {
     if (!cadModalOpen || !data?.student) return
@@ -704,6 +711,7 @@ export default function AdminStudentDetail() {
   if (!data) return <p className="text-slate-500">Carregando…</p>
 
   const s = data.student
+  const linkedinAvatarUrl = linkedInAvatarUrlFromProfileField(s.linkedin)
   const contracts = data.contracts ?? []
   const calCounts = data.calendar_session_counts ?? {
     total: 0,
@@ -739,21 +747,47 @@ export default function AdminStudentDetail() {
       {/* Cabeçalho */}
       <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-900 to-slate-800 px-5 py-6 text-white shadow-lg sm:px-8 sm:py-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-slate-300">
-              <User className="h-5 w-5 shrink-0" aria-hidden />
-              <span className="text-sm font-medium">Aluno</span>
+          <div className="flex min-w-0 flex-1 gap-4 sm:gap-5">
+            <div className="shrink-0">
+              <div
+                className="relative h-[4.5rem] w-[4.5rem] overflow-hidden rounded-2xl border-2 border-white/35 bg-white/10 shadow-md sm:h-[5.5rem] sm:w-[5.5rem]"
+                title={linkedinAvatarUrl ? 'Foto via LinkedIn (serviço externo)' : undefined}
+              >
+                {linkedinAvatarUrl && !linkedinAvatarFailed ? (
+                  <img
+                    src={linkedinAvatarUrl}
+                    alt=""
+                    width={88}
+                    height={88}
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-cover"
+                    onError={() => setLinkedinAvatarFailed(true)}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-white/50" aria-hidden>
+                    <User className="h-9 w-9 sm:h-11 sm:w-11" />
+                  </div>
+                )}
+              </div>
             </div>
-            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight sm:text-3xl">
-              {s?.full_name || s?.email}
-            </h1>
-            <p className="mt-0.5 text-slate-400">{s?.email}</p>
-            <p className="mt-2 text-sm text-slate-500">ID #{s?.id}</p>
-            {(s?.phone || s?.city) && (
-              <p className="mt-3 text-sm text-slate-300">
-                {[s.phone, s.city].filter(Boolean).join(' · ')}
-              </p>
-            )}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-slate-300">
+                <User className="h-5 w-5 shrink-0" aria-hidden />
+                <span className="text-sm font-medium">Aluno</span>
+              </div>
+              <h1 className="mt-1 truncate text-2xl font-bold tracking-tight sm:text-3xl">
+                {s?.full_name || s?.email}
+              </h1>
+              <p className="mt-0.5 text-slate-400">{s?.email}</p>
+              <p className="mt-2 text-sm text-slate-500">ID #{s?.id}</p>
+              {(s?.phone || s?.city) && (
+                <p className="mt-3 text-sm text-slate-300">
+                  {[s.phone, s.city].filter(Boolean).join(' · ')}
+                </p>
+              )}
+            </div>
           </div>
           {listAttention && (
             <div
@@ -1275,32 +1309,7 @@ export default function AdminStudentDetail() {
             </p>
           </div>
         </div>
-        <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total registrado</p>
-            <p className="mt-1 text-2xl font-bold text-slate-900">{calCounts.total}</p>
-          </div>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">Realizadas</p>
-            <p className="mt-1 text-2xl font-bold text-emerald-950">{calCounts.completed}</p>
-            <p className="mt-1 text-xs text-emerald-900">Encontro realizado</p>
-          </div>
-          <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-amber-900">Agendadas</p>
-            <p className="mt-1 text-2xl font-bold text-amber-950">{calCounts.scheduled}</p>
-            <p className="mt-1 text-xs text-amber-900">Futuras ou por fechar</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Canceladas</p>
-            <p className="mt-1 text-2xl font-bold text-slate-800">{calCounts.cancelled}</p>
-            <p className="mt-1 text-xs text-slate-600">Cancelamento com registo</p>
-          </div>
-          <div className="rounded-xl border border-rose-200 bg-rose-50/60 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-rose-900">Não realizadas</p>
-            <p className="mt-1 text-2xl font-bold text-rose-950">{calCounts.not_held ?? 0}</p>
-            <p className="mt-1 text-xs text-rose-900">Falta, no-show, etc.</p>
-          </div>
-        </div>
+        <CalendarSessionsKpiGrid counts={calCounts} />
         {calSessions.length === 0 ? (
           <p className="text-sm text-slate-600">
             Ainda sem agendamentos associados a este aluno. No calendário admin, crie um evento e escolha este aluno

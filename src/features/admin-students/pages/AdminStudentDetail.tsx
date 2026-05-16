@@ -73,7 +73,7 @@ import {
   isMentorNoteAttachmentFileAllowed,
   resolveMentorNoteAttachmentMime,
 } from '@/shared/lib/mentorNoteAttachments'
-import { linkedInAvatarUrlFromProfileField } from '@/shared/lib/linkedinProfile'
+import { useProfileAvatarFallback } from '@/shared/lib/useProfileAvatarFallback'
 
 export default function AdminStudentDetail() {
   const { id } = useParams()
@@ -129,8 +129,6 @@ export default function AdminStudentDetail() {
   const contractDeleteModalTitleId = useId()
   const [snapBusyId, setSnapBusyId] = useState(null)
   const [portalAccessBusy, setPortalAccessBusy] = useState(false)
-  const [linkedinAvatarFailed, setLinkedinAvatarFailed] = useState(false)
-
   const patchStudentPortalAccess = useCallback(async (partial) => {
     if (!id) return
     setPortalAccessBusy(true)
@@ -167,10 +165,6 @@ export default function AdminStudentDetail() {
       u.country,
     ].join('\u0000')
   }, [id, data?.student])
-
-  useEffect(() => {
-    setLinkedinAvatarFailed(false)
-  }, [studentSyncKey])
 
   useEffect(() => {
     if (!cadModalOpen || !data?.student) return
@@ -700,6 +694,8 @@ export default function AdminStudentDetail() {
     return m
   }, [data])
 
+  const profileAvatar = useProfileAvatarFallback(data?.student?.linkedin, data?.student?.github)
+
   if (authLoad) {
     return (
       <div className="flex min-h-[12rem] items-center justify-center text-slate-500" aria-hidden>
@@ -711,7 +707,6 @@ export default function AdminStudentDetail() {
   if (!data) return <p className="text-slate-500">Carregando…</p>
 
   const s = data.student
-  const linkedinAvatarUrl = linkedInAvatarUrlFromProfileField(s.linkedin)
   const contracts = data.contracts ?? []
   const calCounts = data.calendar_session_counts ?? {
     total: 0,
@@ -751,11 +746,12 @@ export default function AdminStudentDetail() {
             <div className="shrink-0">
               <div
                 className="relative h-[4.5rem] w-[4.5rem] overflow-hidden rounded-2xl border-2 border-white/35 bg-white/10 shadow-md sm:h-[5.5rem] sm:w-[5.5rem]"
-                title={linkedinAvatarUrl ? 'Foto via LinkedIn (serviço externo)' : undefined}
+                title={profileAvatar.title}
               >
-                {linkedinAvatarUrl && !linkedinAvatarFailed ? (
+                {profileAvatar.imageUrl ? (
                   <img
-                    src={linkedinAvatarUrl}
+                    key={profileAvatar.imageUrl}
+                    src={profileAvatar.imageUrl}
                     alt=""
                     width={88}
                     height={88}
@@ -763,7 +759,7 @@ export default function AdminStudentDetail() {
                     decoding="async"
                     referrerPolicy="no-referrer"
                     className="h-full w-full object-cover"
-                    onError={() => setLinkedinAvatarFailed(true)}
+                    onError={profileAvatar.onImageError}
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-white/50" aria-hidden>

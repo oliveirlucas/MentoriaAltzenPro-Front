@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useId, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '@/features/auth'
 import { useToast } from '@/shared/ui/ToastContext'
@@ -92,6 +93,8 @@ export default function AdminStudentDetail() {
   const [noteSaving, setNoteSaving] = useState(false)
   const [noteDraftKey, setNoteDraftKey] = useState(0)
   const noteFileInputRef = useRef(null)
+  const [noteModalOpen, setNoteModalOpen] = useState(false)
+  const noteModalTitleId = useId()
 
   const [cadEmail, setCadEmail] = useState('')
   const [cadFullName, setCadFullName] = useState('')
@@ -217,6 +220,7 @@ export default function AdminStudentDetail() {
 
   useEffect(() => {
     setCadModalOpen(false)
+    setNoteModalOpen(false)
     setNewCycleModalOpen(false)
     setContractDeleteTarget(null)
     setTitle('')
@@ -299,6 +303,16 @@ export default function AdminStudentDetail() {
     setNoteDraftKey((k) => k + 1)
   }, [])
 
+  const closeNoteModal = useCallback(() => {
+    setNoteModalOpen(false)
+    resetNoteComposer()
+  }, [resetNoteComposer])
+
+  const openNewNoteModal = useCallback(() => {
+    resetNoteComposer()
+    setNoteModalOpen(true)
+  }, [resetNoteComposer])
+
   const startEditNote = useCallback((note) => {
     if (!note) return
     setEditingNoteId(note.id)
@@ -317,7 +331,21 @@ export default function AdminStudentDetail() {
     setNoteExistingFiles(Array.isArray(note.attachment_files) ? note.attachment_files : [])
     setNoteRemovedFileIds([])
     setNotePendingFiles([])
+    setNoteModalOpen(true)
   }, [])
+
+  useEffect(() => {
+    if (!noteModalOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !noteSaving) closeNoteModal()
+    }
+    document.addEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = ''
+    }
+  }, [noteModalOpen, noteSaving, closeNoteModal])
 
   const openAdminNoteFile = useCallback(async (fileId, _fileName) => {
     try {
@@ -400,6 +428,7 @@ export default function AdminStudentDetail() {
           }),
         })
       }
+      setNoteModalOpen(false)
       resetNoteComposer()
       const d = await api(`/admin/students/${id}`)
       setData(d)
@@ -1522,10 +1551,20 @@ export default function AdminStudentDetail() {
 
       {/* Linha do tempo (histórico) */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
-          <History className="h-5 w-5 text-slate-600" />
-          Histórico
-        </h2>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+            <History className="h-5 w-5 text-slate-600" />
+            Histórico
+          </h2>
+          <button
+            type="button"
+            onClick={openNewNoteModal}
+            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-900 hover:bg-indigo-100"
+          >
+            <Plus className="h-4 w-4 shrink-0" aria-hidden />
+            Nova nota
+          </button>
+        </div>
         <p className="mb-6 text-sm text-slate-600">Notas do mentor, envios de formulários e criação de inscrição (mais recente primeiro).</p>
         {timeline.length === 0 && <p className="text-slate-500">Sem eventos registrados ainda.</p>}
         {timeline.length > 0 && (
@@ -1594,19 +1633,37 @@ export default function AdminStudentDetail() {
 
       {/* Notas (ação) */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <h2 className="text-lg font-bold text-slate-900">Notas ao aluno</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Conteúdo com <strong>formatação</strong> (negrito, títulos, listas, links no texto), mais links e anexos em
-          baixo (PDF, imagens, ZIP ou RAR). Aparece em Recursos quando estiver <strong>visível</strong>. Para relatório
-          só da mentoria, use{' '}
-          <Link
-            to={`/admin/alunos/${id}/anotacoes-internas`}
-            className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold text-slate-900">Notas ao aluno</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Conteúdo com <strong>formatação</strong> (negrito, títulos, listas, links no texto), mais links e anexos
+              em baixo (PDF, imagens, ZIP ou RAR). Aparece em Recursos quando estiver <strong>visível</strong>. Para
+              relatório só da mentoria, use{' '}
+              <Link
+                to={`/admin/alunos/${id}/anotacoes-internas`}
+                className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+              >
+                Anotações internas
+              </Link>
+              .
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={openNewNoteModal}
+            className="inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800"
           >
-            Anotações internas
-          </Link>
-          .
-        </p>
+            <Plus className="h-4 w-4 shrink-0" aria-hidden />
+            Nova nota
+          </button>
+        </div>
+
+        {notesVisibleToStudent.length === 0 && (
+          <p className="mt-4 text-sm text-slate-500">
+            Ainda sem notas visíveis ao aluno. Use <strong>Nova nota</strong> ou edite uma entrada no histórico.
+          </p>
+        )}
 
         {notesVisibleToStudent.length > 0 && (
           <ul className="mt-4 space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-sm">
@@ -1634,23 +1691,45 @@ export default function AdminStudentDetail() {
             ))}
           </ul>
         )}
+      </section>
 
-        <form onSubmit={saveNote} className="mt-4 space-y-3 rounded-xl border border-dashed border-slate-300 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium text-slate-800">
-              {editingNoteId != null ? `Editar nota #${editingNoteId}` : 'Nova nota'}
-            </p>
-            {editingNoteId != null && (
+      {noteModalOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex max-h-[100dvh] items-center justify-center overflow-y-auto overscroll-contain p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={noteModalTitleId}
+          >
+          <button
+            type="button"
+            className="absolute inset-0 z-0 cursor-default border-0 bg-slate-900/50 p-0"
+            onClick={() => {
+              if (!noteSaving) closeNoteModal()
+            }}
+            aria-label="Fechar"
+          />
+          <div
+            className="relative z-10 my-auto flex w-full max-h-[min(90dvh,56rem)] max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+              <h2 id={noteModalTitleId} className="text-lg font-bold text-slate-900">
+                {editingNoteId != null ? `Editar nota #${editingNoteId}` : 'Nova nota ao aluno'}
+              </h2>
               <button
                 type="button"
-                onClick={resetNoteComposer}
-                className="text-sm font-medium text-slate-600 hover:text-slate-900"
+                onClick={() => {
+                  if (!noteSaving) closeNoteModal()
+                }}
+                className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                aria-label="Fechar"
               >
-                Cancelar edição
+                <X className="h-5 w-5" aria-hidden />
               </button>
-            )}
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            </div>
+            <form onSubmit={saveNote} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
             <input
               type="checkbox"
               className="h-4 w-4 rounded border-slate-300 text-indigo-600"
@@ -1805,20 +1884,35 @@ export default function AdminStudentDetail() {
             )}
           </div>
 
-          <button
-            type="submit"
-            disabled={noteSaving}
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-800 disabled:opacity-60"
-          >
-            {noteSaving ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-            ) : (
-              <Save className="h-4 w-4 shrink-0" aria-hidden />
-            )}
-            {noteSaving ? 'Salvando…' : editingNoteId != null ? 'Salvar alterações' : 'Enviar nota'}
-          </button>
-        </form>
-      </section>
+              <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+                <button
+                  type="button"
+                  disabled={noteSaving}
+                  onClick={() => {
+                    if (!noteSaving) closeNoteModal()
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={noteSaving}
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-800 disabled:opacity-60"
+                >
+                  {noteSaving ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                  ) : (
+                    <Save className="h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                  {noteSaving ? 'Salvando…' : editingNoteId != null ? 'Salvar alterações' : 'Enviar nota'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+          document.body
+        )}
 
       {newCycleModalOpen && (
         <div

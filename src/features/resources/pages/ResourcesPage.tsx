@@ -5,7 +5,11 @@ import { useToast } from '@/shared/ui/ToastContext'
 import { api, apiBlob } from '@/shared/api/client'
 import { dispatchNotesReadChanged } from '@/features/student-notes/components/StudentNotesBell'
 import { MentorNoteBodyOrPlain } from '@/features/student-notes/components/MentorNoteBody'
-import { ScrollText, Eye, X, Link2, Paperclip } from 'lucide-react'
+import { ScrollText, Eye, X, Link2, Paperclip, Download } from 'lucide-react'
+import {
+  isMentorNoteAttachmentPreviewable,
+  triggerBlobDownload,
+} from '@/shared/lib/mentorNoteAttachments'
 
 function formatPt(iso) {
   if (!iso) return '—'
@@ -152,21 +156,34 @@ export default function ResourcesPage() {
     }
   }, [previewOpen, closePreview])
 
-  const openNoteAttachmentPreview = async (fileId, label) => {
+  const openNoteAttachmentPreview = async (fileId, label, contentType, fileName) => {
+    if (!isMentorNoteAttachmentPreviewable(contentType, fileName)) {
+      toast.error('Este tipo de arquivo não pode ser visualizado. Use Baixar.')
+      return
+    }
     setPreviewLabel(label || 'Anexo')
     try {
-      const { blob, contentType } = await apiBlob(`/me/mentor-note-files/${fileId}/file`)
+      const { blob, contentType: ct } = await apiBlob(`/me/mentor-note-files/${fileId}/file`)
       const url = URL.createObjectURL(blob)
       setPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev)
         return url
       })
-      const ct = (contentType || '').toLowerCase()
-      setPreviewKind(ct.includes('pdf') ? 'pdf' : 'image')
+      const mime = (ct || '').toLowerCase()
+      setPreviewKind(mime.includes('pdf') ? 'pdf' : 'image')
       setPreviewOpen(true)
     } catch (e) {
       setPreviewLabel('')
       toast.error(e.message || 'Não foi possível abrir o anexo.')
+    }
+  }
+
+  const downloadNoteAttachment = async (fileId, fileName) => {
+    try {
+      const { blob } = await apiBlob(`/me/mentor-note-files/${fileId}/file`)
+      triggerBlobDownload(blob, fileName || 'anexo')
+    } catch (e) {
+      toast.error(e.message || 'Não foi possível baixar o anexo.')
     }
   }
 
@@ -329,23 +346,42 @@ export default function ResourcesPage() {
                       <Paperclip className="h-3.5 w-3.5" aria-hidden />
                       Anexos
                     </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      PDF e imagens: pré-visualizar. ZIP, RAR e outros: baixar o arquivo.
+                    </p>
                     <ul className="mt-2 space-y-2">
-                      {fileList.map((f) => (
-                        <li
-                          key={f.id}
-                          className="flex flex-col gap-2 rounded border border-white bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <span className="min-w-0 truncate font-medium text-slate-800">{f.file_name}</span>
-                          <button
-                            type="button"
-                            onClick={() => openNoteAttachmentPreview(f.id, f.file_name)}
-                            className="inline-flex min-h-[40px] shrink-0 items-center justify-center gap-2 rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-800 sm:text-sm"
+                      {fileList.map((f) => {
+                        const canPreview = isMentorNoteAttachmentPreviewable(f.content_type, f.file_name)
+                        return (
+                          <li
+                            key={f.id}
+                            className="flex flex-col gap-2 rounded border border-white bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                           >
-                            <Eye className="h-4 w-4 shrink-0" aria-hidden />
-                            Ver
-                          </button>
-                        </li>
-                      ))}
+                            <span className="min-w-0 truncate font-medium text-slate-800">{f.file_name}</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                canPreview
+                                  ? openNoteAttachmentPreview(f.id, f.file_name, f.content_type, f.file_name)
+                                  : downloadNoteAttachment(f.id, f.file_name)
+                              }
+                              className="inline-flex min-h-[40px] shrink-0 items-center justify-center gap-2 rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-800 sm:text-sm"
+                            >
+                              {canPreview ? (
+                                <>
+                                  <Eye className="h-4 w-4 shrink-0" aria-hidden />
+                                  Ver
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="h-4 w-4 shrink-0" aria-hidden />
+                                  Baixar
+                                </>
+                              )}
+                            </button>
+                          </li>
+                        )
+                      })}
                     </ul>
                   </div>
                 )}

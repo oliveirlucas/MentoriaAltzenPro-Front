@@ -381,7 +381,20 @@ export default function AdminCalendarPage() {
           mentorPrivateNote: outcomePrivateNote.trim() || null,
         }),
       })
-      toast.success('Registo da sessão atualizado.')
+      if (outcomeStatus === 'cancelled' || outcomeStatus === 'not_held') {
+        const wasAlreadyOrphan = ev.googleEventDeleted === true
+        if (wasAlreadyOrphan) {
+          toast.success('Registo da sessão atualizado.')
+        } else {
+          toast.success(
+            outcomeStatus === 'cancelled'
+              ? 'Sessão marcada como cancelada. Evento removido do Google Calendar; o registo permanece aqui na lista e no perfil do aluno.'
+              : 'Sessão marcada como não realizada. Evento removido do Google Calendar; o registo permanece aqui na lista e no perfil do aluno.'
+          )
+        }
+      } else {
+        toast.success('Registo da sessão atualizado.')
+      }
       setOutcomeModal(null)
       await loadEvents()
     } catch (err) {
@@ -505,8 +518,18 @@ export default function AdminCalendarPage() {
     if (!ev?.id) return
     setDeleteBusy(true)
     try {
-      await api(`/admin/google-calendar/events/${encodeURIComponent(ev.id)}`, { method: 'DELETE' })
-      toast.success('Agendamento eliminado.')
+      const out = await api<{ ok: boolean; mode?: string }>(
+        `/admin/google-calendar/events/${encodeURIComponent(ev.id)}`,
+        { method: 'DELETE' }
+      )
+      const mode = out?.mode
+      if (mode === 'orphaned') {
+        toast.success('Evento removido do Google Calendar. O histórico desta sessão continua aqui na lista e no perfil do aluno.')
+      } else if (mode === 'history_purged') {
+        toast.success('Histórico desta sessão apagado.')
+      } else {
+        toast.success('Agendamento eliminado.')
+      }
       setDeleteTarget(null)
       if (editingEventId === ev.id) {
         resetForm()
@@ -865,71 +888,108 @@ export default function AdminCalendarPage() {
         </div>
       ) : null}
 
-      {deleteTarget ? (
-        <div className="fixed inset-0 z-[100] flex max-h-[100dvh] items-center justify-center overflow-y-auto overscroll-contain p-4">
-          <button
-            type="button"
-            className="absolute inset-0 z-0 cursor-default border-0 bg-slate-900/50 p-0"
-            onClick={() => {
-              if (!deleteBusy) setDeleteTarget(null)
-            }}
-            aria-label="Fechar"
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={deleteModalTitleId}
-            className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
-          >
-            <h2 id={deleteModalTitleId} className="text-lg font-bold text-slate-900">
-              Excluir agendamento?
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              O evento será removido do <strong>Google Calendar</strong> e, se estiver associado a um aluno, deixa de
-              contar no portal. Esta ação não pode ser desfeita por aqui.
-            </p>
-            <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-              <p className="font-medium text-slate-900">{deleteTarget.summary || '(sem título)'}</p>
-              <p className="mt-1 text-xs text-slate-600">
-                {formatTimeRange(deleteTarget.start, deleteTarget.end, deleteTarget.allDay)}
-                {deleteTarget.student ? (
-                  <span className="mt-1 block text-indigo-800">
-                    Aluno: {deleteTarget.student.full_name || deleteTarget.student.email}
-                  </span>
-                ) : null}
-              </p>
-            </div>
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                disabled={deleteBusy}
-                onClick={() => setDeleteTarget(null)}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={deleteBusy}
-                onClick={() => confirmDeleteEvent()}
-                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-60"
-              >
-                {deleteBusy ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    Excluindo…
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
-                    Excluir
-                  </>
-                )}
-              </button>
+      {deleteTarget ? (() => {
+        const dt = deleteTarget
+        const isOrphan = dt.googleEventDeleted === true
+        const status = dt.sessionStatus || ''
+        const isTerminalLive = !isOrphan && (status === 'cancelled' || status === 'not_held' || status === 'completed')
+
+        let title = 'Excluir agendamento?'
+        let description: React.ReactNode = (
+          <>
+            O evento será removido do <strong>Google Calendar</strong> e, se estiver associado a um aluno, deixa de
+            contar no portal. Esta ação não pode ser desfeita por aqui.
+          </>
+        )
+        let confirmLabel = 'Excluir'
+        let confirmBusyLabel = 'Excluindo…'
+
+        if (isOrphan) {
+          title = 'Apagar histórico desta sessão?'
+          description = (
+            <>
+              Esta sessão já <strong>não existe no Google Calendar</strong>. Apagar agora <strong>remove o registo histórico</strong>
+              {' '}da lista do calendário e do perfil do aluno. Esta ação não pode ser desfeita.
+            </>
+          )
+          confirmLabel = 'Apagar histórico'
+          confirmBusyLabel = 'Apagando…'
+        } else if (isTerminalLive) {
+          title = 'Remover evento do Google Calendar?'
+          description = (
+            <>
+              O evento será removido do <strong>Google Calendar</strong>. O histórico desta sessão (estado, atribuição,
+              motivo e notas) <strong>permanece no perfil do aluno</strong> e nesta lista, marcado como removido do Google.
+              Para apagar o histórico, clique em «Excluir» de novo depois.
+            </>
+          )
+          confirmLabel = 'Remover do Google'
+          confirmBusyLabel = 'Removendo…'
+        }
+
+        return (
+          <div className="fixed inset-0 z-[100] flex max-h-[100dvh] items-center justify-center overflow-y-auto overscroll-contain p-4">
+            <button
+              type="button"
+              className="absolute inset-0 z-0 cursor-default border-0 bg-slate-900/50 p-0"
+              onClick={() => {
+                if (!deleteBusy) setDeleteTarget(null)
+              }}
+              aria-label="Fechar"
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={deleteModalTitleId}
+              className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+            >
+              <h2 id={deleteModalTitleId} className="text-lg font-bold text-slate-900">
+                {title}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">{description}</p>
+              <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                <p className="font-medium text-slate-900">{dt.summary || '(sem título)'}</p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {formatTimeRange(dt.start, dt.end, dt.allDay)}
+                  {dt.student ? (
+                    <span className="mt-1 block text-indigo-800">
+                      Aluno: {dt.student.full_name || dt.student.email}
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+              <div className="mt-6 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={deleteBusy}
+                  onClick={() => setDeleteTarget(null)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteBusy}
+                  onClick={() => confirmDeleteEvent()}
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-60"
+                >
+                  {deleteBusy ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                      {confirmBusyLabel}
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
+                      {confirmLabel}
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        )
+      })() : null}
 
       {showForm ? (
         <div className="fixed inset-0 z-[100] flex max-h-[100dvh] items-start justify-center overflow-y-auto overscroll-contain p-4 py-8 sm:py-10">

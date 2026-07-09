@@ -1596,6 +1596,60 @@ export default function AdminStudentDetail() {
                   {ev.body && (
                     <p className="mt-1 line-clamp-3 text-sm text-slate-600">{stripHtmlToPlain(ev.body as string)}</p>
                   )}
+                  {ev.kind === 'nota' && (() => {
+                    const links = Array.isArray(ev.attachment_links)
+                      ? (ev.attachment_links as Array<{ label?: string | null; url?: string | null }>)
+                      : []
+                    const files = Array.isArray(ev.attachment_files)
+                      ? (ev.attachment_files as Array<{ id: number; file_name?: string; content_type?: string }>)
+                      : []
+                    if (!links.length && !files.length) return null
+                    return (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        {links.length > 0 && (
+                          <ul className="flex flex-wrap gap-1.5">
+                            {links.map((l, i) => {
+                              const url = typeof l?.url === 'string' ? l.url.trim() : ''
+                              if (!url) return null
+                              const label = typeof l?.label === 'string' && l.label.trim() ? l.label.trim() : url
+                              return (
+                                <li key={`link-${i}`}>
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100"
+                                    title={url}
+                                  >
+                                    <Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                    <span className="truncate max-w-[16rem]">{label}</span>
+                                    <ExternalLink className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
+                                  </a>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        )}
+                        {files.length > 0 && (
+                          <ul className="flex flex-wrap gap-1.5">
+                            {files.map((f) => (
+                              <li key={`file-${f.id}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => openAdminNoteFile(f.id, f.file_name || '')}
+                                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                  title={f.file_name || 'anexo'}
+                                >
+                                  <Paperclip className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                                  <span className="truncate max-w-[16rem]">{f.file_name || `anexo #${f.id}`}</span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )
+                  })()}
                   {ev.kind === 'nota' && ev.noteId != null && (() => {
                     const n = (data?.notes || []).find((x) => x.id === ev.noteId)
                     if (!n) return null

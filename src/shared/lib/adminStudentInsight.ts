@@ -714,11 +714,11 @@ export function buildTimeline({
 }): Array<Record<string, unknown>> {
   const ev: Array<Record<string, unknown>> = []
   for (const n of notes || []) {
-    const links = Array.isArray(n.attachment_links) ? n.attachment_links.length : 0
-    const files = Array.isArray(n.attachment_files) ? n.attachment_files.length : 0
+    const rawLinks = Array.isArray(n.attachment_links) ? n.attachment_links : []
+    const rawFiles = Array.isArray(n.attachment_files) ? n.attachment_files : []
     const bits = [n.visible_to_student ? 'Visível ao aluno' : 'Apenas mentor']
-    if (links) bits.push(`${links} link(s)`)
-    if (files) bits.push(`${files} anexo(s)`)
+    if (rawLinks.length) bits.push(`${rawLinks.length} link(s)`)
+    if (rawFiles.length) bits.push(`${rawFiles.length} anexo(s)`)
     ev.push({
       kind: 'nota',
       at: n.created_at,
@@ -727,6 +727,8 @@ export function buildTimeline({
       body: n.body,
       id: `n-${n.id}`,
       noteId: n.id,
+      attachment_links: rawLinks,
+      attachment_files: rawFiles,
     })
   }
   for (const f of form_snapshots || []) {

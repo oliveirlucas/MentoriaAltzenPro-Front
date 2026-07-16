@@ -7,7 +7,7 @@ import {
   SESSION_ATTRIBUTION_OPTIONS,
   SESSION_REASON_OPTIONS,
 } from '@/shared/lib/calendarSessionLabels'
-import AdminCalendarMonthGrid from '@/features/admin-calendar/components/AdminCalendarMonthGrid'
+import AdminCalendarMonthGrid, { type EventForGrid } from '@/features/admin-calendar/components/AdminCalendarMonthGrid'
 import CalendarEventRow from '@/features/admin-calendar/components/CalendarEventRow'
 import {
   ADMIN_CALENDAR_VIEW_TZ,
@@ -268,6 +268,30 @@ export default function AdminCalendarPage() {
       out.set(ymd, cur)
     }
     return out
+  }, [events])
+
+  const gridEventsByYmd = useMemo(() => {
+    const m = new Map<string, EventForGrid[]>()
+    for (const ev of events) {
+      const ymd = civilYmdFromInstantInZone(ev.start, ADMIN_CALENDAR_VIEW_TZ)
+      if (ymd === '_') continue
+      if (!m.has(ymd)) m.set(ymd, [])
+      m.get(ymd)!.push({
+        id: ev.id,
+        summary: ev.summary || '',
+        start: ev.start,
+        sessionStatus: ev.sessionStatus,
+        student: ev.student,
+      })
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => {
+        const ta = a.start ? new Date(a.start).getTime() : 0
+        const tb = b.start ? new Date(b.start).getTime() : 0
+        return ta - tb
+      })
+    }
+    return m
   }, [events])
 
   const monthGridCells = useMemo(
@@ -731,7 +755,7 @@ export default function AdminCalendarPage() {
                   todayYmd={todayYmdSp}
                   selectedYmd={selectedDayYmd}
                   onSelectYmd={handleSelectGridDay}
-                  summaryByYmd={summaryByYmd}
+                  eventsByYmd={gridEventsByYmd}
                 />
               </div>
             )}

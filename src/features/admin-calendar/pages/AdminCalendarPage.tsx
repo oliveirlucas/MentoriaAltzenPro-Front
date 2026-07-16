@@ -271,7 +271,7 @@ export default function AdminCalendarPage() {
   }, [events])
 
   const monthGridCells = useMemo(
-    () => buildMonthGridCells(monthCursor.getFullYear(), monthCursor.getMonth(), true),
+    () => buildMonthGridCells(monthCursor.getFullYear(), monthCursor.getMonth(), false),
     [monthCursor]
   )
 

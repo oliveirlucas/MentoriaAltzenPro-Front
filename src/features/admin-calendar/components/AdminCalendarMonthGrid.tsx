@@ -1,7 +1,7 @@
 import React from 'react'
 import type { MonthGridCell } from '@/features/admin-calendar/lib/calendarSp'
 
-const WEEK_LABELS_MON = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+const WEEK_LABELS_MON = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
 type DaySummary = {
   total: number

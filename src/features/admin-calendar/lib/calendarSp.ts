@@ -50,7 +50,7 @@ export type MonthGridCell =
 export function buildMonthGridCells(
   viewYear: number,
   viewMonth0: number,
-  weekStartsMonday = true
+  weekStartsMonday = false
 ): MonthGridCell[] {
   const first = new Date(viewYear, viewMonth0, 1)
   const lastDay = new Date(viewYear, viewMonth0 + 1, 0).getDate()

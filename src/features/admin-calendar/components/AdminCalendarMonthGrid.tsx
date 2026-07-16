@@ -45,8 +45,6 @@ function getEventName(ev: EventForGrid): string {
   return ev.summary || ''
 }
 
-const MAX_SHOWN = 2
-
 export default function AdminCalendarMonthGrid({
   cells,
   todayYmd,
@@ -77,8 +75,6 @@ export default function AdminCalendarMonthGrid({
           }
 
           const dayEvs = eventsByYmd.get(c.ymd) || []
-          const shown = dayEvs.slice(0, MAX_SHOWN)
-          const overflow = dayEvs.length - MAX_SHOWN
           const isToday = c.ymd === todayYmd
           const isSelected = c.ymd === selectedYmd
 
@@ -103,9 +99,9 @@ export default function AdminCalendarMonthGrid({
                 {c.dayNum}
               </span>
 
-              {shown.length > 0 && (
+              {dayEvs.length > 0 && (
                 <div className="flex w-full flex-col gap-px">
-                  {shown.map((ev) => (
+                  {dayEvs.map((ev) => (
                     <span
                       key={ev.id}
                       className={`flex w-full min-w-0 items-center gap-0.5 rounded px-0.5 py-px text-[8px] leading-tight sm:text-[9px] ${chipClass(ev.sessionStatus)}`}
@@ -114,11 +110,6 @@ export default function AdminCalendarMonthGrid({
                       <span className="truncate">{getEventName(ev)}</span>
                     </span>
                   ))}
-                  {overflow > 0 && (
-                    <span className="pl-0.5 text-[8px] leading-tight text-slate-400 sm:text-[9px]">
-                      +{overflow}
-                    </span>
-                  )}
                 </div>
               )}
             </button>
